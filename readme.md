@@ -4,9 +4,22 @@
 strava1 = https://www.kaggle.com/datasets/olegoaer/running-races-strava
 
 
+###  criar um novo venv caso preciese 
+```bash
+python -m venv .venv
+```
 ### ative o ambiente:
 ```bash
     source .venv/bin/activate
+```
+
+```bash
+    .\.venv\Scripts\Activate.ps1
+```
+
+###  Instale as dependências
+```bash
+   pip install polars numpy scikit-learn matplotlib xgboost jupyter
 ```
 
 ### rodar (sem jupyter):
