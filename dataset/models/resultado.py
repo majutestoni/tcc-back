@@ -10,7 +10,7 @@ import polars as pl
 @dataclass
 class ResultadoModelo:
     nome: str
-    categoria: Literal["pace", "tempo", "treino"]
+    categoria: Literal["pace", "tempo", "treino", "corredor"]
     metricas: dict[str, float]
     detalhes: dict = field(default_factory=dict)
     recomendacoes: pl.DataFrame | None = None
