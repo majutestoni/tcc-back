@@ -15,7 +15,7 @@ COL_NIVEL_VOLUME = "nivel_volume"
 COL_NIVEL_DISTANCIA = "nivel_distancia"
 COL_PERFIL_ATLETA = "perfil_atleta"
 
-# Limiares para classificação de tipo de treino (normalizacao.py)
+# Limiares para classificação de tipo de treino (preprocessamento.py)
 LIMIAR_DIST_LONGAO = 0.75
 LIMIAR_PACE_INTERVALADO = 0.5
 LIMIAR_PACE_LEVE = 0.4

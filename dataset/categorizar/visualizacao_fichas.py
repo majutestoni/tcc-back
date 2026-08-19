@@ -10,6 +10,8 @@ from matplotlib.figure import Figure
 from matplotlib.patches import FancyBboxPatch
 
 from dataset.constants import *
+from dataset.preprocessamento import formatar_delta_pace, formatar_pace
+from dataset.categorizar.tabela_fichas import tabela_fichas
 
 NOMES_M = [
     "Lucas Silva", "Pedro Almeida", "Rafael Costa", "Bruno Martins",
@@ -51,16 +53,24 @@ NOMES_F = [
     "Simone Bastos", "Tânia Queiroz", "Vera Pires", "Wanda Neves",
 ]
 
-CORES_PERFIL = {
-    "avancado": "#1B7F4E",
-    "fundista": "#2E86AB",
-    "intermediario": "#E09F3E",
-    "iniciante": "#E84855",
+CORES_CATEGORIA = {
+    "C0-M": "#2E86AB",
+    "C1-M": "#1B7F4E",
+    "C0-F": "#E84855",
+    "C1-F": "#E09F3E",
 }
+
+_PALETA_FALLBACK = ["#2E86AB", "#1B7F4E", "#E84855", "#E09F3E", "#6A4C93", "#555555"]
+
+
+def _cor_categoria(categoria: str) -> str:
+    if categoria in CORES_CATEGORIA:
+        return CORES_CATEGORIA[categoria]
+    idx = abs(hash(categoria)) % len(_PALETA_FALLBACK)
+    return _PALETA_FALLBACK[idx]
 
 
 def _atribuir_nomes_unicos(athlete_ids: list[int], genders: list[str]) -> list[str]:
-    """Atribui nomes fictícios estáveis e únicos por atleta."""
     usados: set[str] = set()
     nomes: list[str] = []
 
@@ -84,33 +94,44 @@ def _atribuir_nomes_unicos(athlete_ids: list[int], genders: list[str]) -> list[s
     return nomes
 
 
-def montar_fichas_atletas(
-    perfil_regras: pl.DataFrame,
-    perfil_kmeans: pl.DataFrame,
-) -> pl.DataFrame:
+def montar_fichas_atletas(perfil: pl.DataFrame, por_genero: bool = True) -> pl.DataFrame:
     """
-    Une perfil por regras + cluster KMeans e calcula distância
-    até o melhor e o pior pace da mesma categoria (perfil_atleta).
+    Calcula, por categoria, a distância de cada atleta até o melhor e o pior pace.
+
+    Se `categoria` já existir no perfil (ex.: clusterização separada por gênero),
+    usa essa coluna. Caso contrário, monta C{cluster}-{gênero} quando `por_genero=True`.
     """
-    fichas = (
-        perfil_regras.join(
-            perfil_kmeans.select(COL_ATHLETE, COL_CLUSTER_CORREDOR),
-            on=COL_ATHLETE,
-            how="inner",
-        )
-        .with_columns(
-            pl.col(COL_GENDER).cast(pl.Utf8).str.strip_chars().str.to_uppercase()
-        )
+    fichas = perfil.with_columns(
+        pl.col(COL_GENDER).cast(pl.Utf8).str.strip_chars().str.to_uppercase()
     )
 
-    limites = fichas.group_by(COL_PERFIL_ATLETA).agg(
+    if "categoria" not in fichas.columns:
+        if por_genero:
+            fichas = fichas.with_columns(
+                (
+                    pl.lit("C")
+                    + pl.col(COL_CLUSTER_CORREDOR).cast(pl.Utf8)
+                    + pl.lit("-")
+                    + pl.col(COL_GENDER)
+                ).alias("categoria")
+            )
+            chaves = [COL_CLUSTER_CORREDOR, COL_GENDER]
+        else:
+            fichas = fichas.with_columns(
+                (pl.lit("C") + pl.col(COL_CLUSTER_CORREDOR).cast(pl.Utf8)).alias("categoria")
+            )
+            chaves = [COL_CLUSTER_CORREDOR]
+    else:
+        chaves = ["categoria"]
+
+    limites = fichas.group_by(chaves).agg(
         pl.col(COL_PACE).min().alias("pace_melhor_categoria"),
         pl.col(COL_PACE).max().alias("pace_pior_categoria"),
         pl.len().alias("atletas_na_categoria"),
     )
 
     fichas = (
-        fichas.join(limites, on=COL_PERFIL_ATLETA, how="left")
+        fichas.join(limites, on=chaves, how="left")
         .with_columns(
             (pl.col(COL_PACE) - pl.col("pace_melhor_categoria"))
             .round(3)
@@ -118,10 +139,10 @@ def montar_fichas_atletas(
             (pl.col("pace_pior_categoria") - pl.col(COL_PACE))
             .round(3)
             .alias("dist_pace_pior"),
-            (pl.col(COL_PACE).rank("ordinal").over(COL_PERFIL_ATLETA))
+            (pl.col(COL_PACE).rank("ordinal").over(chaves))
             .alias("ranking_na_categoria"),
         )
-        .sort(COL_PERFIL_ATLETA, COL_PACE)
+        .sort("categoria", COL_PACE)
     )
 
     nomes = _atribuir_nomes_unicos(
@@ -132,8 +153,9 @@ def montar_fichas_atletas(
 
 
 def _desenhar_ficha(ax: Axes, row: dict) -> None:
-    perfil = row[COL_PERFIL_ATLETA]
-    cor = CORES_PERFIL.get(perfil, "#555555")
+    cluster = int(row[COL_CLUSTER_CORREDOR])
+    categoria = row["categoria"]
+    cor = _cor_categoria(categoria)
 
     ax.set_xlim(0, 10)
     ax.set_ylim(0, 10)
@@ -176,16 +198,10 @@ def _desenhar_ficha(ax: Axes, row: dict) -> None:
 
     linhas = [
         f"Corridas no dataset: {int(row[COL_N_CORRIDAS])}",
-        f"Pace mediano: {row[COL_PACE]:.2f} min/km",
+        f"Pace mediano: {formatar_pace(float(row[COL_PACE]))}",
         f"Distância mediana: {row[COL_DISTANCE] / 1000:.1f} km",
         f"Frequência: {row[COL_FREQUENCIA]:.2f} corridas/semana",
-        f"KMeans: cluster {row[COL_CLUSTER_CORREDOR]}",
-        f"Perfil (regras): {perfil}",
-        (
-            f"Eixos: pace={row[COL_NIVEL_PACE]} · "
-            f"volume={row[COL_NIVEL_VOLUME]} · "
-            f"dist={row[COL_NIVEL_DISTANCIA]}"
-        ),
+        f"Categoria: {categoria} (cluster {cluster} · {genero_txt})",
         (
             f"Ranking na categoria: "
             f"{int(row['ranking_na_categoria'])}/{int(row['atletas_na_categoria'])}"
@@ -196,25 +212,24 @@ def _desenhar_ficha(ax: Axes, row: dict) -> None:
         ax.text(0.5, y, texto, fontsize=8.5, va="center", color="#222")
         y -= 0.72
 
-    # Gauge melhor ← atleta → pior (eixo de pace)
     pace = float(row[COL_PACE])
     melhor = float(row["pace_melhor_categoria"])
     pior = float(row["pace_pior_categoria"])
     span = max(pior - melhor, 1e-6)
     pos = (pace - melhor) / span
 
-    ax.text(0.5, 1.85, "Posição no pace da categoria", fontsize=8, color="#444")
+    ax.text(0.5, 1.85, f"Posição no pace — {categoria}", fontsize=8, color="#444")
     ax.plot([0.7, 9.3], [1.15, 1.15], color="#DDDDDD", lw=8, solid_capstyle="round")
     ax.plot([0.7, 9.3], [1.15, 1.15], color=cor, lw=3, solid_capstyle="round", alpha=0.35)
     x_atleta = 0.7 + pos * 8.6
     ax.plot(x_atleta, 1.15, "o", color=cor, markersize=10, zorder=5)
 
-    ax.text(0.7, 0.55, f"Melhor\n{melhor:.2f}", fontsize=7, ha="left", color="#1B7F4E")
-    ax.text(9.3, 0.55, f"Pior\n{pior:.2f}", fontsize=7, ha="right", color="#E84855")
+    ax.text(0.7, 0.55, f"Melhor\n{formatar_pace(melhor, '')}", fontsize=7, ha="left", color="#1B7F4E")
+    ax.text(9.3, 0.55, f"Pior\n{formatar_pace(pior, '')}", fontsize=7, ha="right", color="#E84855")
     ax.text(
         5.0, 0.55,
-        f"+{row['dist_pace_melhor']:.2f} do melhor  |  "
-        f"+{row['dist_pace_pior']:.2f} do pior",
+        f"{formatar_delta_pace(float(row['dist_pace_melhor']))} do melhor  |  "
+        f"{formatar_delta_pace(float(row['dist_pace_pior']))} do pior",
         fontsize=7.5, ha="center", color="#333",
     )
 
@@ -224,10 +239,10 @@ def plotar_fichas_atletas(
     n: int = 6,
     seed: int = 42,
 ) -> Figure:
-    """Desenha fichas visuais de até n atletas (amostra estratificada por perfil)."""
+    """Desenha fichas visuais de até n atletas (amostra estratificada por categoria)."""
     amostras = []
-    for perfil in fichas[COL_PERFIL_ATLETA].unique().to_list():
-        subset = fichas.filter(pl.col(COL_PERFIL_ATLETA) == perfil)
+    for categoria in sorted(fichas["categoria"].unique().to_list()):
+        subset = fichas.filter(pl.col("categoria") == categoria)
         amostras.append(subset.sample(min(1, subset.height), seed=seed))
 
     base = pl.concat(amostras)
@@ -257,7 +272,7 @@ def plotar_fichas_atletas(
         axes_flat[j].axis("off")
 
     fig.suptitle(
-        "Fichas de atletas — KMeans × perfil por regras",
+        "Fichas de atletas — posição no pace (cluster × gênero)",
         fontsize=14,
         y=1.01,
     )
@@ -266,7 +281,6 @@ def plotar_fichas_atletas(
 
 
 def plotar_ficha_atleta(fichas: pl.DataFrame, athlete_id: int) -> Figure:
-    """Desenha a ficha de um atleta específico."""
     subset = fichas.filter(pl.col(COL_ATHLETE) == athlete_id)
     if subset.height == 0:
         raise ValueError(f"Atleta {athlete_id} não encontrado nas fichas.")
@@ -276,23 +290,3 @@ def plotar_ficha_atleta(fichas: pl.DataFrame, athlete_id: int) -> Figure:
     fig.suptitle("Ficha do atleta", fontsize=13)
     plt.tight_layout()
     return fig
-
-
-def tabela_fichas(fichas: pl.DataFrame) -> pl.DataFrame:
-    """Versão tabular resumida das fichas."""
-    return (
-        fichas.select(
-            pl.col(COL_ATHLETE).alias("id"),
-            pl.col("nome_ficticio").alias("nome"),
-            pl.col(COL_GENDER).alias("genero"),
-            pl.col(COL_N_CORRIDAS).alias("corridas"),
-            pl.col(COL_CLUSTER_CORREDOR).alias("kmeans"),
-            pl.col(COL_PERFIL_ATLETA).alias("perfil"),
-            pl.col(COL_PACE).round(2).alias("pace"),
-            pl.col("dist_pace_melhor").alias("delta_melhor"),
-            pl.col("dist_pace_pior").alias("delta_pior"),
-            pl.col("ranking_na_categoria").alias("rank"),
-            pl.col("atletas_na_categoria").alias("n_categoria"),
-        )
-        .sort("perfil", "pace")
-    )

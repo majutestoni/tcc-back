@@ -41,10 +41,10 @@ def tabela_resumo(df: pl.DataFrame) -> pl.DataFrame:
     return pl.DataFrame([resumo_dataset(df)])
 
 
-def resumo_normalizacao(df_raw: pl.DataFrame, df: pl.DataFrame) -> pl.DataFrame:
+def resumo_preprocessamento(df_raw: pl.DataFrame, df: pl.DataFrame) -> pl.DataFrame:
     return pl.DataFrame([
         {"etapa": "Dataset bruto", "registros": df_raw.height},
-        {"etapa": "Após normalização", "registros": df.height},
+        {"etapa": "Após preprocessamento", "registros": df.height},
         {
             "etapa": "Registros removidos",
             "registros": df_raw.height - df.height,
@@ -124,7 +124,7 @@ def plotar_histograma_fc(df: pl.DataFrame, ax: Axes | None = None) -> Axes:
 
 def plotar_distribuicao_tipo_treino(df: pl.DataFrame, ax: Axes | None = None) -> Axes:
     if COL_TIPO_TREINO not in df.columns:
-        raise ValueError(f"Coluna '{COL_TIPO_TREINO}' não encontrada. Use normalizar(df) antes.")
+        raise ValueError(f"Coluna '{COL_TIPO_TREINO}' não encontrada. Use preprocessar(df) antes.")
 
     contagem = df.group_by(COL_TIPO_TREINO).agg(pl.len().alias("qtd"))
     qtd_por_tipo = {
@@ -208,7 +208,7 @@ def plotar_corridas_por_atleta(df: pl.DataFrame, ax: Axes | None = None) -> Axes
 
 def plotar_pace_vs_distancia(df: pl.DataFrame, ax: Axes | None = None) -> Axes:
     if COL_TIPO_TREINO not in df.columns:
-        raise ValueError(f"Coluna '{COL_TIPO_TREINO}' não encontrada. Use normalizar(df) antes.")
+        raise ValueError(f"Coluna '{COL_TIPO_TREINO}' não encontrada. Use preprocessar(df) antes.")
 
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 5))

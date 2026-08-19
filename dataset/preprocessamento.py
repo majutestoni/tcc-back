@@ -2,7 +2,7 @@ import polars as pl
 from .constants import *
 
 
-def remover_linhas_sem_genero(df: pl.DataFrame, col_gender: str = COL_GENDER) -> pl.DataFrame:
+def filtrar_genero_valido(df: pl.DataFrame, col_gender: str = COL_GENDER) -> pl.DataFrame:
     """
     Remove linhas em que gender não é M ou F.
     """
@@ -14,7 +14,7 @@ def remover_linhas_sem_genero(df: pl.DataFrame, col_gender: str = COL_GENDER) ->
         .is_in(["M", "F"])
     )
 
-def normalizar_frequencia_cardiaca(
+def imputar_frequencia_cardiaca(
     df: pl.DataFrame, mediana_treino: float | None = None
 ) -> pl.DataFrame:
     """
@@ -37,7 +37,7 @@ def normalizar_frequencia_cardiaca(
 
     return df
 
-def remover_corridas_invalidas(df: pl.DataFrame) -> pl.DataFrame:
+def filtrar_corridas_validas(df: pl.DataFrame) -> pl.DataFrame:
     """
     Remove corridas com:
     - distância muito pequena
@@ -73,6 +73,7 @@ def remover_corridas_invalidas(df: pl.DataFrame) -> pl.DataFrame:
     )
 
     return df
+
 def classificar_tipo_treino(df: pl.DataFrame) -> pl.DataFrame:
     """
     Classifica cada corrida em: leve, longao, ritmo ou intervalado.
@@ -110,9 +111,33 @@ def classificar_tipo_treino(df: pl.DataFrame) -> pl.DataFrame:
 
     return df.drop("_pace_medio", "_pace_std", "_dist_p75", "_hr_mediana")
 
-def normalizar(df: pl.DataFrame) -> pl.DataFrame:
-    df = remover_linhas_sem_genero(df)
-    df = normalizar_frequencia_cardiaca(df)
-    df = remover_corridas_invalidas(df)
+def formatar_pace(pace_decimal: float, sufixo: str = "/km") -> str:
+    """Converte pace decimal (ex.: 6.67) para min:seg (ex.: 6:40/km)."""
+    minutos = int(pace_decimal)
+    segundos = int(round((pace_decimal - minutos) * 60))
+    if segundos == 60:
+        minutos += 1
+        segundos = 0
+    return f"{minutos}:{segundos:02d}{sufixo}"
+
+
+def formatar_delta_pace(delta_decimal: float) -> str:
+    """Formata diferença de pace decimal como +min:seg ou +Ns."""
+    sinal = "+" if delta_decimal >= 0 else "-"
+    delta = abs(delta_decimal)
+    minutos = int(delta)
+    segundos = int(round((delta - minutos) * 60))
+    if segundos == 60:
+        minutos += 1
+        segundos = 0
+    if minutos == 0:
+        return f"{sinal}{segundos}s"
+    return f"{sinal}{minutos}:{segundos:02d}"
+
+
+def preprocessar(df: pl.DataFrame) -> pl.DataFrame:
+    df = filtrar_genero_valido(df)
+    df = imputar_frequencia_cardiaca(df)
+    df = filtrar_corridas_validas(df)
     df = classificar_tipo_treino(df)
     return df

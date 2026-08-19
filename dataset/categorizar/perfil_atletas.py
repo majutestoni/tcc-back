@@ -7,6 +7,7 @@ from dataset.constants import (
     COL_DISTANCE,
     COL_FREQUENCIA,
     COL_GENDER,
+    COL_HR,
     COL_N_CORRIDAS,
     COL_NIVEL_DISTANCIA,
     COL_NIVEL_PACE,
@@ -27,7 +28,7 @@ def montar_perfil_atletas(df: pl.DataFrame) -> pl.DataFrame:
     Agrega métricas por atleta a partir de distância, pace e timestamp.
 
     Retorna: athlete, gender, distance (m) mediana, pace mediano,
-    frequencia_semana e n_corridas.
+    FC mediana, frequencia_semana e n_corridas.
     """
     df_ts = df.with_columns(
         pl.col(COL_TIMESTAMP)
@@ -40,6 +41,7 @@ def montar_perfil_atletas(df: pl.DataFrame) -> pl.DataFrame:
         .agg(
             pl.col(COL_DISTANCE).median().alias(COL_DISTANCE),
             pl.col(COL_PACE).median().alias(COL_PACE),
+            pl.col(COL_HR).median().alias(COL_HR),
             pl.col("_ts").min().alias("_ts_min"),
             pl.col("_ts").max().alias("_ts_max"),
             pl.len().alias(COL_N_CORRIDAS),
@@ -54,7 +56,7 @@ def montar_perfil_atletas(df: pl.DataFrame) -> pl.DataFrame:
             ).alias(COL_FREQUENCIA)
         )
         .drop("_ts_min", "_ts_max")
-        .drop_nulls([COL_DISTANCE, COL_PACE, COL_FREQUENCIA])
+        .drop_nulls([COL_DISTANCE, COL_PACE, COL_HR, COL_FREQUENCIA])
     )
 
 
