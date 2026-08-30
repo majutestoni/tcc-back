@@ -2,10 +2,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 
 from dataset.categorizar.perfil_atletas import montar_perfil_atletas
+from dataset.categorizar.validacao_cluster import metricas_internas
 from dataset.constants import *
 from dataset.models.resultado import ResultadoModelo
 from dataset.preprocessamento import formatar_pace
@@ -84,7 +84,7 @@ def _aplicar_kmeans(
     perfil: pl.DataFrame,
     features: list[str],
     n_clusters: int,
-) -> tuple[pl.DataFrame, float, float, dict[str, dict[str, float]], StandardScaler]:
+) -> tuple[pl.DataFrame, float, float, dict[str, dict[str, float]], StandardScaler, dict]:
     k = min(n_clusters, perfil.height)
     if k < 1:
         raise ValueError("Perfil vazio para clusterização.")
@@ -97,7 +97,8 @@ def _aplicar_kmeans(
     labels = modelo.fit_predict(X_scaled)
 
     inercia = float(modelo.inertia_)
-    silhueta = float(silhouette_score(X_scaled, labels)) if k > 1 else 0.0
+    internas = metricas_internas(X_scaled, labels)
+    silhueta = internas["silhouette"] or 0.0
 
     centros = scaler.inverse_transform(modelo.cluster_centers_)
     centros_dict = {
@@ -106,7 +107,7 @@ def _aplicar_kmeans(
     }
 
     perfil = perfil.with_columns(pl.Series(COL_CLUSTER_CORREDOR, labels))
-    return perfil, inercia, silhueta, centros_dict, scaler
+    return perfil, inercia, silhueta, centros_dict, scaler, internas
 
 
 def treina_kmeans(
@@ -125,7 +126,7 @@ def treina_kmeans(
         features = [COL_DISTANCE, COL_PACE]
 
     perfil = montar_perfil_atletas(df)
-    perfil, inercia, silhueta, centros_dict, scaler = _aplicar_kmeans(
+    perfil, inercia, silhueta, centros_dict, scaler, internas = _aplicar_kmeans(
         perfil, features, n_clusters
     )
     contagem = (
@@ -137,7 +138,15 @@ def treina_kmeans(
     resultado = ResultadoModelo(
         nome=f"KMeans ({_nome_combinacao(features)}, k={n_clusters})",
         categoria="corredor",
-        metricas={"inercia": inercia, "silhouette": silhueta},
+        metricas={
+            "inercia": inercia,
+            "silhouette": silhueta,
+            **{
+                k: v
+                for k, v in internas.items()
+                if k != "silhouette" and v is not None
+            },
+        },
         detalhes={
             "n_clusters": n_clusters,
             "features": features,
@@ -145,6 +154,7 @@ def treina_kmeans(
             "contagem_clusters": contagem.to_dicts(),
             "scaler_mean": scaler.mean_.tolist(),
             "scaler_scale": scaler.scale_.tolist(),
+            "metricas_internas": internas,
         },
         df_exibir=perfil,
         y_pred=perfil[COL_CLUSTER_CORREDOR].to_numpy(),
@@ -155,6 +165,10 @@ def treina_kmeans(
         print("Features:", features)
         print("Inércia:", round(inercia, 4))
         print("Silhouette:", round(silhueta, 4))
+        if internas.get("davies_bouldin") is not None:
+            print("Davies-Bouldin:", round(internas["davies_bouldin"], 4))
+        if internas.get("calinski_harabasz") is not None:
+            print("Calinski-Harabasz:", round(internas["calinski_harabasz"], 4))
         print("Atletas clusterizados:", perfil.height)
         print("Contagem por cluster:")
         print(contagem)
@@ -202,7 +216,7 @@ def treina_kmeans_por_genero(
             continue
 
         k = min(n_clusters, subset.height)
-        rotulado, inercia, silhueta, centros, scaler = _aplicar_kmeans(
+        rotulado, inercia, silhueta, centros, scaler, internas = _aplicar_kmeans(
             subset, features, k
         )
         rotulado = rotulado.with_columns(
@@ -237,6 +251,11 @@ def treina_kmeans_por_genero(
             "k": k,
             "inercia": inercia,
             "silhouette": silhueta,
+            **{
+                nome: valor
+                for nome, valor in internas.items()
+                if nome != "silhouette" and valor is not None
+            },
         }
         inercia_total += inercia
         silhueta_ponderada += silhueta * subset.height
@@ -276,9 +295,14 @@ def treina_kmeans_por_genero(
         print("\nMétricas por gênero:")
         for genero, m in metricas_genero.items():
             rotulo = "Masculino" if genero == "M" else "Feminino"
+            extras = ""
+            if m.get("davies_bouldin") is not None:
+                extras += f" | db={m['davies_bouldin']:.4f}"
+            if m.get("calinski_harabasz") is not None:
+                extras += f" | ch={m['calinski_harabasz']:.1f}"
             print(
                 f"  {rotulo}: {m['n_atletas']} atletas | k={m['k']} | "
-                f"silhouette={m['silhouette']:.4f} | inercia={m['inercia']:.4f}"
+                f"silhouette={m['silhouette']:.4f} | inercia={m['inercia']:.4f}{extras}"
             )
         print("\nContagem por categoria:")
         print(pl.DataFrame(contagem_list))
