@@ -15,6 +15,8 @@ _LABELS = {
     COL_PACE: "Pace mediano (min:seg/km)",
     COL_FREQUENCIA: "Frequência (corridas/semana)",
     COL_HR: "FC mediana (bpm)",
+    COL_N_CORRIDAS: "Nº de corridas",
+    COL_ELEVATION: "Elevação mediana (m)",
 }
 
 
@@ -36,6 +38,10 @@ def _formatar_centro(centro: dict[str, float], features: list[str]) -> str:
             partes.append(f"freq={valor:.2f} corridas/semana")
         elif col == COL_HR:
             partes.append(f"fc={valor:.1f} bpm")
+        elif col == COL_N_CORRIDAS:
+            partes.append(f"corridas={int(valor)}")
+        elif col == COL_ELEVATION:
+            partes.append(f"elev={valor:.0f} m")
         else:
             partes.append(f"{col}={valor:.2f}")
     return " | ".join(partes)
@@ -47,6 +53,8 @@ def _nome_combinacao(features: list[str]) -> str:
         COL_PACE: "pace",
         COL_FREQUENCIA: "frequência",
         COL_HR: "FC",
+        COL_N_CORRIDAS: "nº corridas",
+        COL_ELEVATION: "elevação",
     }
     return " + ".join(nomes.get(col, col) for col in features)
 

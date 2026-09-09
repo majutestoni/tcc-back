@@ -18,14 +18,20 @@ from sklearn.metrics import (
 )
 from sklearn.preprocessing import StandardScaler
 
-from dataset.categorizar.perfil_atletas import definir_perfil_atleta
+from dataset.categorizar.perfil_atletas import definir_perfil_atleta, montar_perfil_atletas
 from dataset.constants import (
     COL_ATHLETE,
     COL_CLUSTER_CORREDOR,
+    COL_DISTANCE,
+    COL_ELEVATION,
+    COL_FREQUENCIA,
     COL_GENDER,
+    COL_HR,
+    COL_N_CORRIDAS,
     COL_NIVEL_DISTANCIA,
     COL_NIVEL_PACE,
     COL_NIVEL_VOLUME,
+    COL_PACE,
     COL_PERFIL_ATLETA,
 )
 from dataset.models.resultado import ResultadoModelo

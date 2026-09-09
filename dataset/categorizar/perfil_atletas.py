@@ -5,6 +5,7 @@ import polars as pl
 from dataset.constants import (
     COL_ATHLETE,
     COL_DISTANCE,
+    COL_ELEVATION,
     COL_FREQUENCIA,
     COL_GENDER,
     COL_HR,
@@ -36,17 +37,21 @@ def montar_perfil_atletas(df: pl.DataFrame) -> pl.DataFrame:
         .alias("_ts")
     )
 
+    agg_exprs = [
+        pl.col(COL_DISTANCE).median().alias(COL_DISTANCE),
+        pl.col(COL_PACE).median().alias(COL_PACE),
+        pl.col(COL_HR).median().alias(COL_HR),
+        pl.col("_ts").min().alias("_ts_min"),
+        pl.col("_ts").max().alias("_ts_max"),
+        pl.len().alias(COL_N_CORRIDAS),
+        pl.col(COL_GENDER).first().alias(COL_GENDER),
+    ]
+    if COL_ELEVATION in df.columns:
+        agg_exprs.append(pl.col(COL_ELEVATION).median().alias(COL_ELEVATION))
+
     return (
         df_ts.group_by(COL_ATHLETE)
-        .agg(
-            pl.col(COL_DISTANCE).median().alias(COL_DISTANCE),
-            pl.col(COL_PACE).median().alias(COL_PACE),
-            pl.col(COL_HR).median().alias(COL_HR),
-            pl.col("_ts").min().alias("_ts_min"),
-            pl.col("_ts").max().alias("_ts_max"),
-            pl.len().alias(COL_N_CORRIDAS),
-            pl.col(COL_GENDER).first().alias(COL_GENDER),
-        )
+        .agg(*agg_exprs)
         .with_columns(
             (
                 pl.col(COL_N_CORRIDAS)

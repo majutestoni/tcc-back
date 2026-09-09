@@ -19,6 +19,9 @@ from dataset.categorizar.visualizacao_fichas import (
 __all__ = [
     "avaliar_k",
     "comparar_com_perfil_regras",
+    "comparar_combinacoes_features",
+    "comparar_combinacoes_e_k",
+    "sugerir_melhor_config",
     "definir_perfil_atleta",
     "estabilidade_kmeans",
     "metricas_externas",
