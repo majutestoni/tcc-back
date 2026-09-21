@@ -1,0 +1,13 @@
+# Segredos / ambiente
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# SO
+.DS_Store

@@ -19,7 +19,23 @@ python -m venv .venv
 
 ###  Instale as dependências
 ```bash
-   pip install polars numpy scikit-learn matplotlib xgboost jupyter
+   pip install polars numpy scikit-learn matplotlib xgboost jupyter google-genai streamlit
+```
+
+### recomendação de treino via Gemini
+Configure a chave da API (copie `.env.example` para `.env` e preencha `GEMINI_API_KEY`):
+```bash
+cp .env.example .env
+```
+Rode a recomendação para um atleta específico:
+```bash
+python -m gemini.recomendacao <athlete_id>
+```
+
+### app Streamlit (demo)
+Interface interativa (mantém os notebooks para exploração):
+```bash
+streamlit run app/Home.py
 ```
 
 ### rodar (sem jupyter):

@@ -572,6 +572,8 @@ DATABASE_URL=sqlite:///./run_metrics.db
 ```
 
 > **Nota**: O serviço ML (`tcc-back-2`) ainda precisa expor essa API FastAPI. O backend MUST tratar indisponibilidade do ML graciosamente.
+>
+> **Nota (recomendação)**: O `recommendation` pode ser produzido por dois motores no ML, sem alterar este contrato: (a) **regras** (baseline determinístico) ou (b) **LLM via Gemini** (pacote `gemini/`, ver ADR-010 do `tcc-back-2`). O Gemini adiciona os campos opcionais `justificativa` e `alertas` à recomendação.
 
 ### 6.7 Modelo de Dados (SQLAlchemy)
 
