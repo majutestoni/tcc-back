@@ -167,7 +167,9 @@ def _gerar_recomendacoes(
     parametros: dict,
     athlete_id: int | None = None,
     metodo: str = "regras",
+    meta: dict[str, float] | None = None,
 ) -> pl.DataFrame:
+    meta_uso = meta if meta is not None else META
     df_janela = filtrar_janela_temporal(df)
 
     pace_por_atleta = (
@@ -186,7 +188,7 @@ def _gerar_recomendacoes(
             row[col_tipo]: row["percentual"]
             for row in dist_atleta.iter_rows(named=True)
         }
-        deficits = calcular_deficit(META, atual)
+        deficits = calcular_deficit(meta_uso, atual)
         pace_row = pace_por_atleta.filter(pl.col(COL_ATHLETE) == aid)
         if pace_row.height == 0:
             continue
@@ -200,7 +202,9 @@ def _gerar_recomendacoes(
         )
         rec[COL_ATHLETE] = aid
         rec["metodo"] = metodo
-        rec["erro_distribuicao"] = round(calcular_erro_distribuicao(atual), 3)
+        rec["erro_distribuicao"] = round(
+            calcular_erro_distribuicao(atual, meta=meta_uso), 3
+        )
         recomendacoes.append(rec)
 
     return pl.DataFrame(recomendacoes)
@@ -243,30 +247,40 @@ def plotar_recomendacao_atleta(
     resultado: pl.DataFrame,
     athlete_id: int,
     col_tipo: str = COL_TIPO_TREINO,
+    meta: dict[str, float] | None = None,
 ) -> None:
+    meta_uso = meta if meta is not None else META
     df_janela = filtrar_janela_temporal(df)
     distribuicao = distribuicao_por_atleta(df_janela, col_tipo)
     dist = distribuicao.filter(pl.col(COL_ATHLETE) == athlete_id)
 
-    tipos = list(META.keys())
+    tipos = list(meta_uso.keys())
     atual = [0.0] * len(tipos)
     for row in dist.iter_rows(named=True):
+        if row[col_tipo] not in tipos:
+            continue
         idx = tipos.index(row[col_tipo])
         atual[idx] = row["percentual"] * 100
 
-    meta = [META[t] * 100 for t in tipos]
+    meta_pct = [meta_uso[t] * 100 for t in tipos]
     rec = resultado.filter(pl.col(COL_ATHLETE) == athlete_id)
     tipo_rec = rec["tipo"][0] if rec.height > 0 else "?"
+    titulo_extra = ""
+    if rec.height and "rotulo_cluster" in rec.columns:
+        titulo_extra = f" · {rec['rotulo_cluster'][0]}"
 
     x = np.arange(len(tipos))
     width = 0.35
     _, ax = plt.subplots(figsize=(8, 5))
     ax.bar(x - width / 2, atual, width, label="Atual (%)", color="steelblue")
-    ax.bar(x + width / 2, meta, width, label="Meta (%)", color="coral", alpha=0.8)
+    ax.bar(x + width / 2, meta_pct, width, label="Meta (%)", color="coral", alpha=0.8)
     ax.set_xticks(x)
     ax.set_xticklabels(tipos)
     ax.set_ylabel("Percentual (%)")
-    ax.set_title(f"Atleta {athlete_id} — últimas {SEMANAS_JANELA} semanas\nRecomendado: {tipo_rec}")
+    ax.set_title(
+        f"Atleta {athlete_id}{titulo_extra} — últimas {SEMANAS_JANELA} semanas\n"
+        f"Recomendado: {tipo_rec}"
+    )
     ax.legend()
     plt.tight_layout()
     plt.show()

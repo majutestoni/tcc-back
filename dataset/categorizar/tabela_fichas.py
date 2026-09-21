@@ -13,12 +13,16 @@ from dataset.preprocessamento import formatar_delta_pace, formatar_pace
 
 def tabela_fichas(fichas: pl.DataFrame) -> pl.DataFrame:
     ordenado = fichas.sort("categoria", COL_PACE)
-    return pl.DataFrame(
+    cols: dict = {
+        "id": ordenado[COL_ATHLETE],
+        "nome": ordenado["nome_ficticio"],
+        "genero": ordenado[COL_GENDER],
+        "categoria": ordenado["categoria"],
+    }
+    if "rotulo_cluster" in ordenado.columns:
+        cols["perfil"] = ordenado["rotulo_cluster"]
+    cols.update(
         {
-            "id": ordenado[COL_ATHLETE],
-            "nome": ordenado["nome_ficticio"],
-            "genero": ordenado[COL_GENDER],
-            "categoria": ordenado["categoria"],
             "corridas": ordenado[COL_N_CORRIDAS],
             "cluster": ordenado[COL_CLUSTER_CORREDOR],
             "dist_km": (ordenado[COL_DISTANCE] / 1000).round(2),
@@ -39,3 +43,4 @@ def tabela_fichas(fichas: pl.DataFrame) -> pl.DataFrame:
             "n_categoria": ordenado["atletas_na_categoria"],
         }
     )
+    return pl.DataFrame(cols)

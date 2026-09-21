@@ -196,12 +196,18 @@ def _desenhar_ficha(ax: Axes, row: dict) -> None:
         color="white", fontsize=8, ha="right", va="center", alpha=0.9,
     )
 
+    rotulo = row.get("rotulo_cluster") or row.get("nome_cluster")
+    categoria_txt = (
+        f"Categoria: {rotulo} ({categoria})"
+        if rotulo
+        else f"Categoria: {categoria} (cluster {cluster} · {genero_txt})"
+    )
     linhas = [
         f"Corridas no dataset: {int(row[COL_N_CORRIDAS])}",
         f"Pace mediano: {formatar_pace(float(row[COL_PACE]))}",
         f"Distância mediana: {row[COL_DISTANCE] / 1000:.1f} km",
         f"Frequência: {row[COL_FREQUENCIA]:.2f} corridas/semana",
-        f"Categoria: {categoria} (cluster {cluster} · {genero_txt})",
+        categoria_txt,
         (
             f"Ranking na categoria: "
             f"{int(row['ranking_na_categoria'])}/{int(row['atletas_na_categoria'])}"

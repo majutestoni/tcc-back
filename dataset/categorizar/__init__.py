@@ -1,4 +1,5 @@
 from dataset.categorizar.kmeans import treina_kmeans, treina_kmeans_por_genero
+from dataset.categorizar.nomear_clusters import nomear_categorias, tabela_descritiva_clusters
 from dataset.categorizar.perfil_atletas import definir_perfil_atleta, montar_perfil_atletas
 from dataset.categorizar.tabela_fichas import tabela_fichas
 from dataset.categorizar.validacao_cluster import (
@@ -28,9 +29,11 @@ __all__ = [
     "metricas_internas",
     "montar_fichas_atletas",
     "montar_perfil_atletas",
+    "nomear_categorias",
     "plotar_ficha_atleta",
     "plotar_fichas_atletas",
     "silhouette_por_amostra",
+    "tabela_descritiva_clusters",
     "tabela_fichas",
     "treina_kmeans",
     "treina_kmeans_por_genero",

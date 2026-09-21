@@ -33,6 +33,7 @@ pip install jupyter
 jupyter notebook notebooks/visualizacao_dataset.ipynb
 jupyter notebook notebooks/comparacao_modelos.ipynb
 jupyter notebook notebooks/categorizacao_corredores.ipynb
+jupyter notebook notebooks/recomendacao_treino.ipynb
 ```
 
 
