@@ -3,6 +3,29 @@
 ### bases de dados usadas
 strava1 = https://www.kaggle.com/datasets/olegoaer/running-races-strava
 
+---
+
+## 🚀 Setup rápido (clonar e rodar)
+
+Depois de clonar o repositório, um único comando cria o ambiente, instala tudo e sobe o app:
+
+**macOS / Linux**
+```bash
+bash run.sh
+```
+
+**Windows (PowerShell)**
+```powershell
+.\run.ps1
+```
+
+O script cria o `.venv`, instala as dependências do `requirements.txt`, gera o `.env`
+(se não existir) e abre o Streamlit. Depois é só preencher a `GEMINI_API_KEY` no `.env`
+para usar a recomendação via Gemini.
+
+---
+
+## Setup manual (passo a passo)
 
 ###  criar um novo venv caso preciese 
 ```bash
@@ -10,16 +33,15 @@ python -m venv .venv
 ```
 ### ative o ambiente:
 ```bash
-    source .venv/bin/activate
-```
-
-```bash
-    .\.venv\Scripts\Activate.ps1
+# macOS / Linux
+source .venv/bin/activate
+# Windows (PowerShell)
+.\.venv\Scripts\Activate.ps1
 ```
 
 ###  Instale as dependências
 ```bash
-   pip install polars numpy scikit-learn matplotlib xgboost jupyter google-genai streamlit
+   pip install -r requirements.txt
 ```
 
 ### recomendação de treino via Gemini

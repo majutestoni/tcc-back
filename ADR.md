@@ -183,6 +183,77 @@ Execução: `streamlit run app/Home.py`.
 
 ---
 
+### ADR-012 — Imports lazy para não carregar dependências pesadas fora de uso
+**Status:** Aceita
+**Contexto:** A página `2_Atletas.py` do Streamlit (ADR-011) ficou **muito lenta para carregar** (~25 s no primeiro acesso, ~5,5 s nos seguintes). Medição isolou o custo: o pipeline de dados em si leva ~0,12 s; o gargalo era o **import**. A página só usa código Polars puro (`definir_perfil_atleta`, `montar_perfil_atletas`), mas:
+- `dataset/categorizar/__init__.py` importava **avidamente** `kmeans` (arrasta `sklearn`, ~3 s + build de cache de fonte), `validacao_cluster` e `visualizacao_fichas`. Como o Python executa o `__init__.py` do pacote antes de qualquer submódulo, importar `dataset.categorizar.definir_perfil_atleta` já pagava o custo do sklearn.
+- `dataset/models/previsao_treino/model.py` importava `matplotlib.pyplot`/`numpy` no topo, embora só sejam usados nas funções de plot; `app/shared.py` importa desse módulo (`META`, `calcular_deficit`, ...), arrastando matplotlib para a página de Atletas.
+
+**Decisão:** Adotar **imports lazy** para dependências pesadas (sklearn, matplotlib, numpy) que não estão no caminho quente:
+- `dataset/categorizar/__init__.py` usa `__getattr__` de módulo (PEP 562) com um mapa nome→submódulo. A API pública (`from dataset.categorizar import treina_kmeans`) continua idêntica, mas o submódulo só é importado no primeiro acesso ao símbolo. (De brinde, corrigiu um bug latente: `comparar_combinacoes_features`, `comparar_combinacoes_e_k` e `sugerir_melhor_config` estavam no `__all__` mas nunca eram importados.)
+- Em `model.py`, `matplotlib.pyplot`/`numpy` foram movidos para dentro de `plotar_recomendacao_atleta` e `plotar_resumo_recomendacoes`.
+- Em `app/shared.py`, `matplotlib` é importado dentro de `grafico_distribuicao` (com `matplotlib.use("Agg")` antes de `pyplot`).
+
+**Consequências:** A página de Atletas passou a carregar em ~1 s (majoritariamente o import baseline do próprio `streamlit`), sem tocar em sklearn/matplotlib. **Convenção:** `__init__.py` de pacotes que agregam submódulos pesados deve usar `__getattr__` lazy; módulos de dados não devem importar libs de plot/ML no topo se elas só são usadas em funções específicas.
+
+---
+
+### ADR-013 — Persistência do histórico de recomendações da IA em CSV
+**Status:** Aceita
+**Contexto:** As recomendações via Gemini (ADR-010) eram efêmeras — geradas e exibidas, mas não guardadas. O TCC precisa de um **histórico** consultável das recomendações da IA por atleta.
+**Decisão:** Persistir as recomendações em **CSV** (`output/recomendacoes.csv`), seguindo o padrão já usado para `output/atletas.csv` (ADR-011) e a stack Polars (ADR-001) — **sem introduzir banco de dados** (a persistência "de verdade" segue sendo responsabilidade do backend orquestrador, ver SPEC). Novo módulo [gemini/historico.py](gemini/historico.py):
+- `salvar_recomendacao(athlete_id, recomendacao, origem="gemini", quando=None)` — anexa uma linha ao CSV (append: lê + `pl.concat` + reescreve). Timestamp no formato da convenção `"%d/%m/%Y %H:%M"`. Aceita **tanto** o `RecomendacaoTreino` do Gemini (com `justificativa`/`alertas`) **quanto** o dict da recomendação por regras (ADR-007) — nesse caso `justificativa` fica vazia e `alertas` `[]`, pois o modelo por regras não os produz.
+- `carregar_historico()` — lê o CSV (schema fixo); retorna tabela vazia se ainda não existir.
+- `alertas_para_lista(valor)` — os `alertas` (lista) são serializados como **JSON** na coluna para round-trip fiel.
+- Colunas: `athlete_id, timestamp, origem, tipo, descricao, distancia_km, pace_alvo_min_km, tempo_estimado_min, justificativa, alertas`.
+**Salvamento automático:** ao gerar via Gemini na página `1_Recomendacao_Treino.py`, são salvas **as duas** recomendações do atleta — a do Gemini (`origem="gemini"`) e a por regras (`origem="regras"`). O gatilho é o clique em "Recomendar via Gemini" (não o render da página), evitando duplicatas a cada rerun do Streamlit. O CSV é semeado com a primeira recomendação do atleta `5151970` (longão, 16 km, pace 5.35, 85.6 min).
+**Consequências:** `origem` distingue gemini/regras no histórico. Sem controle de concorrência (append reescreve o arquivo) — aceitável para o demo mono-usuário. Clicar Gemini várias vezes gera múltiplos registros (cada um com seu timestamp), por design. Quando o backend (SPEC 6.6) assumir persistência, este CSV vira apenas conveniência de demo.
+
+---
+
+### ADR-014 — Página de Histórico de recomendações no Streamlit
+**Status:** Aceita
+**Contexto:** Complemento de ADR-011 e ADR-013: expor o histórico persistido na vitrine Streamlit.
+**Decisão:** Nova página [app/pages/3_Historico_Recomendacoes.py](app/pages/3_Historico_Recomendacoes.py): tabela de recomendações com filtro por tipo e busca por ID do atleta, seção de detalhe (expander por recomendação, com justificativa e alertas) e botão de download do CSV. **Não** usa `@st.cache_data` para refletir imediatamente novas recomendações salvas (o CSV é pequeno; leitura por rerun é barata).
+**Consequências:** Escopo atual do app passa a ser: Recomendação de Treino, Atletas e Histórico de Recomendações.
+
+---
+
+### ADR-015 — Portar os notebooks para telas do Streamlit
+**Status:** Aceita
+**Contexto:** ADR-011 introduziu o Streamlit como vitrine, mas apenas com Recomendação de Treino, Atletas e Histórico. Os notebooks (`notebooks/`) concentram os gráficos e análises importantes do TCC (EDA, clusterização, recomendação por cluster, comparação de modelos) e são ruins para apresentação. A usuária pediu para **trazer os notebooks para o Streamlit**, separando por telas na mesma divisão do Jupyter, sem remover os notebooks.
+**Decisão:** Criar **uma página Streamlit por notebook**, espelhando as seções (headers) de cada um:
+- `app/pages/2_Visualizacao_Dataset.py` ← `notebooks/visualizacao_dataset.ipynb` (resumo estatístico, impacto da normalização, painel EDA, relações dos modelos, gráficos individuais, posição multidimensional do atleta — radar + coordenadas paralelas).
+- `app/pages/3_Comparacao_Modelos.py` ← `notebooks/comparacao_modelos.ipynb` (tabela comparativa, scatter de regressão pace/tempo, MAE/R², **detalhes por modelo** — coeficientes/importâncias/previsão-exemplo + **relatório de classificação** do RF de treino —, erro de distribuição, F1-macro e matriz de confusão do RF de treino, **teste de recomendação** — parâmetros calibrados + gráfico atual×meta por atleta (`plotar_recomendacao_atleta`) + amostra —, comparação de tipos recomendados e resumo do melhor por categoria).
+- `app/pages/4_Categorizacao_Corredores.py` ← `notebooks/categorizacao_corredores.ipynb` (KMeans por gênero k=2, **testes de escolha de features × k** com sugestão automática e curvas de silhouette, tabela descritiva, scatter com centróides, **validação interna completa** — silhouette/Davies-Bouldin/Calinski-Harabasz + estabilidade ARI + grid de k=2..7 + silhouette por atleta —, **validação externa** — ARI/NMI/homogeneidade/completude/V-measure vs perfil por regras + tabelas de contingência —, e fichas de atletas — tabela + visuais + ficha individual).
+
+O notebook `recomendacao_treino.ipynb` (recomendação **por cluster**) **não** virou tela: a página `6_Recomendacao_por_Cluster.py` chegou a ser criada mas foi **removida a pedido da usuária** (o loader `recomendacoes_por_cluster` em `app/shared.py` foi retirado junto). A recomendação de treino no app segue apenas pela página `6_Recomendacao_Treino.py` (regras + Gemini, ADR-010/011).
+
+**Ordem do menu (prefixo numérico do arquivo):** 1) Home, 2) Visualização do Dataset, 3) Comparação de Modelos, 4) Categorização de Corredores — KMeans, 5) Atletas, 6) Recomendação de Treino, 7) Histórico de Recomendações.
+
+Novos loaders cacheados em `app/shared.py` (`carregar_df_raw`, `perfil_multidim`, `clusters_por_genero`, `tabela_clusters`, `fichas_atletas`, `executar_modelos`, e — para a validação de clusters — `comparacao_features_k`, `grid_k_por_genero`, `validacao_clusters`, `silhouette_amostras`, reaproveitando `comparar_features.py` e `validacao_cluster.py`) **reaproveitam** as funções de `dataset/` e mantêm os imports pesados (sklearn/xgboost/matplotlib) **dentro das funções** (ADR-012), para não penalizar a página de Atletas.
+**Reuso de gráficos:** funções de plot que **retornam** `Figure`/`Axes` (as de `dataset/analise.py`, `visualizacao_fichas.py`, e os helpers `plotar_scatter_regressao`/`plotar_matriz_confusao`) são chamadas direto e passadas a `st.pyplot`. Funções que fazem `plt.show()` internamente e retornam `None` são capturadas via `st.pyplot(plt.gcf())` + `plt.close("all")`. Blocos que só imprimiam (`resumo_melhores`, `exibir_detalhes_modelo`) foram reconstruídos em componentes nativos do Streamlit (`st.metric`, `st.dataframe`).
+**Consequências:** Escopo do app passa a ter **7 telas** (Home + 6 páginas). Os notebooks seguem mantidos como fonte exploratória (decisão da usuária em ADR-011). A página de Comparação de Modelos treina os 8 modelos no primeiro acesso (cacheado por `@st.cache_data`).
+
+---
+
+### ADR-016 — Cache do Streamlit persistido em disco para telas pesadas
+**Status:** Aceita
+**Contexto:** O `@st.cache_data` padrão guarda o resultado **apenas em memória**: a cada restart do servidor (`streamlit run`, salvar um arquivo, etc.) o cache é perdido e tudo recomputa. Medições confirmaram o custo por restart: `executar_modelos` (8 modelos, inclui XGBoost) ≈ **26 s** e `clusters_por_genero` + fichas (import do sklearn) ≈ **2,8 s**. A usuária apontou que telas estáveis (ex.: Visualização do Dataset) não deveriam recarregar do zero.
+**Decisão:** Adicionar `persist="disk"` a **todos** os loaders cacheados de `app/shared.py`. Sob `streamlit run`, o servidor usa `LocalDiskCacheStorageManager` (grava em `.streamlit/cache/`), então o resultado **sobrevive a restarts**: a 1ª execução paga o custo; as seguintes desserializam do disco. Cobertura por tela:
+- **Comparação de Modelos:** `executar_modelos` (8 modelos, ~11 MB serializados).
+- **Categorização — KMeans:** `clusters_por_genero`, `tabela_clusters`, `fichas_atletas` + loaders de análise/validação (`comparacao_features_k`, `grid_k_por_genero`, `validacao_clusters`, `silhouette_amostras`).
+- **Atletas:** `tabela_atletas` (e dependências `carregar_df`, `tabela_perfil_regras`).
+- **Visualização / Recomendação:** `perfil_multidim`, `carregar_df_raw`, `listar_atletas`.
+Confirmado que todos os retornos são picláveis (requisito do `persist="disk"`).
+**Consequências:**
+- `.streamlit/cache/` foi adicionado ao `.gitignore` (não versionar cache).
+- O Streamlit **invalida** o cache automaticamente quando o código da função (ou args) muda — durante desenvolvimento ativo isso força recomputar; em uso normal (só reiniciar o servidor) o cache é reaproveitado.
+- Se o CSV base mudar sem mudar o código, o cache **não** invalida sozinho (a chave é o caminho + hash da função); limpar via menu "Clear cache" do Streamlit ou apagando `.streamlit/cache/`.
+- O `AppTest`/execução fora do servidor usa `MemoryCacheStorageManager` (fallback), então a persistência só é observável sob `streamlit run` — comportamento confirmado no código-fonte do Streamlit (`create_default_cache_storage_manager` → `LocalDiskCacheStorageManager`).
+
+---
+
 ## 4. Convenções
 
 - **Idioma do código:** nomes de funções, variáveis e domínio em **português** (padrão atual do repo: `treina_modelo`, `montar_perfil_atletas`, `calibrar_parametros`). Docstrings em português.
@@ -206,6 +277,7 @@ Execução: `streamlit run app/Home.py`.
 | Este projeto tem API HTTP? | Ainda não (ver ADR-009). |
 | Como recomendar treino via Gemini? | `python -m gemini.recomendacao <athlete_id>` (requer `GEMINI_API_KEY`). Ver ADR-010 e [gemini/](gemini/). |
 | Onde configurar a chave do Gemini? | `.env` (copiar de `.env.example`); lido por `GeminiConfig.from_env()`. |
+| Como clonar e rodar em outra máquina? | `bash run.sh` (macOS/Linux) ou `.\run.ps1` (Windows). Cria venv, instala `requirements.txt`, gera `.env` e sobe o Streamlit. |
 
 ---
 
@@ -219,3 +291,13 @@ Execução: `streamlit run app/Home.py`.
 | 2026-09-21 | IA (Claude) | Modelo padrão do Gemini atualizado para `gemini-3.6-flash` (o `gemini-2.5-flash` foi descontinuado para novos usuários — 404). Página de recomendação passa a carregar vazia com campo de ID do atleta. |
 | 2026-09-21 | IA (Claude) | Nova página `app/pages/2_Atletas.py` (tabela + filtros + busca) e planilha `output/atletas.csv` via `exportar_planilha_atletas`. |
 | 2026-09-21 | IA (Claude) | `GeminiClient` ganha retry com backoff em erros transitórios (429/5xx, ex.: 503 UNAVAILABLE), configurável por `GEMINI_MAX_TENTATIVAS`/`GEMINI_ESPERA_BASE_S`. Logger do SDK silenciado (aviso AFC benigno). Streamlit: `use_container_width` → `width="stretch"`. |
+| 2026-09-21 | IA (Claude) | Adicionados `requirements.txt` e scripts `run.sh`/`run.ps1` para clonar e rodar em um comando. Readme com seção de setup rápido. |
+| 2026-09-21 | IA (Claude) | ADR-012: imports lazy (sklearn/matplotlib) para acelerar a página de Atletas do Streamlit (de ~25 s/~5,5 s para ~1 s). `dataset/categorizar/__init__.py` via `__getattr__` (corrige bug do `__all__`); matplotlib/numpy movidos para dentro das funções de plot em `model.py` e `app/shared.py`. |
+| 2026-09-21 | IA (Claude) | ADR-013 e ADR-014: persistência do histórico de recomendações da IA em `output/recomendacoes.csv` (módulo `gemini/historico.py`, salvo automaticamente ao gerar via Gemini) e nova página `app/pages/3_Historico_Recomendacoes.py`. CSV semeado com a 1ª recomendação do atleta 5151970. |
+| 2026-09-21 | IA (Claude) | ADR-013: salvamento automático passa a gravar **as duas** recomendações (Gemini + por regras, com justificativa/alertas) a cada geração via Gemini. `salvar_recomendacao` aceita `RecomendacaoTreino` ou dict de regras. |
+| 2026-09-23 | IA (Claude) | ADR-015: portados os 4 notebooks para telas do Streamlit (`4_Visualizacao_Dataset`, `5_Categorizacao_Corredores`, `6_Recomendacao_por_Cluster`, `7_Comparacao_Modelos`), com novos loaders cacheados em `app/shared.py`. App passa a ter 7 telas; notebooks mantidos. |
+| 2026-09-24 | IA (Claude) | ADR-015 atualizada: removida a página de recomendação **por cluster** (a pedido da usuária) e o loader `recomendacoes_por_cluster`. Páginas renumeradas para a ordem: Visualização (2), Comparação de Modelos (3), Categorização (4), Atletas (5), Recomendação de Treino (6), Histórico (7). |
+| 2026-09-25 | IA (Claude) | ADR-016: cache do Streamlit persistido em disco (`@st.cache_data(persist="disk")`) nos loaders pesados/estáveis de `app/shared.py`, para não recomputar KMeans e o treino dos 8 modelos a cada restart. `.streamlit/cache/` adicionado ao `.gitignore`. |
+| 2026-09-25 | IA (Claude) | ADR-015: página `4_Categorizacao_Corredores.py` trazida à paridade com o notebook — faltavam os **testes de escolha de features × k**, a **validação interna completa** (silhouette/Davies-Bouldin/Calinski-Harabasz + estabilidade ARI + grid k=2..7 + silhouette por atleta) e toda a **validação externa** (ARI/NMI/homogeneidade/completude/V-measure vs perfil por regras + contingências). Novos loaders em `app/shared.py`: `comparacao_features_k`, `grid_k_por_genero`, `validacao_clusters`, `silhouette_amostras`. |
+| 2026-09-25 | IA (Claude) | ADR-016: `persist="disk"` estendido a **todos** os loaders de `app/shared.py` (incluindo `carregar_df_raw` e `listar_atletas`) — cache de Comparação de Modelos, Categorização e Atletas totalmente persistido entre restarts. Retornos verificados como picláveis (`executar_modelos` ~11 MB). |
+| 2026-09-25 | IA (Claude) | ADR-015: paridade das demais telas. `4_Categorizacao` ganhou as 2 visualizações restantes do notebook (original vs espaço padronizado com elipses de covariância + boxplots por categoria). `3_Comparacao_Modelos` ganhou os **detalhes por modelo** (`exibir_detalhes_modelo` → coeficientes/importâncias/relatório de classificação) e o **teste de recomendação** (parâmetros calibrados + `plotar_recomendacao_atleta` capturado via `st.pyplot(plt.gcf())`); removida a antiga "Amostra de recomendações" (redundante). `5_Atletas` **não** deriva de notebook (ADR-011) — já reaproveita `tabela_atletas`, sem lacuna. |

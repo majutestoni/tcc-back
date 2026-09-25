@@ -11,8 +11,16 @@ st.markdown(
 
     Use o menu lateral para navegar. Disponível agora:
 
+    - **Visualização do Dataset** — resumo, normalização e gráficos exploratórios.
+    - **Comparação de Modelos** — métricas e gráficos de todos os modelos.
+    - **Categorização de Corredores — KMeans** — clusters por gênero e fichas.
+    - **Atletas** — tabela de atletas (id, gênero, perfil, métricas) com filtros.
     - **Recomendação de Treino** — escolha um atleta e veja a recomendação por
       regras e via Gemini.
+    - **Histórico de Recomendações** — recomendações da IA persistidas.
+
+    > As telas de Visualização, Comparação e Categorização são portes dos
+    > notebooks de `notebooks/`.
 
     > Fonte de dados: `dataset/raw-data-kaggle.csv` (pré-processado).
     """

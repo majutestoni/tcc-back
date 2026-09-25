@@ -2,11 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-
-import matplotlib.pyplot as plt
 import polars as pl
 import streamlit as st
 
@@ -43,18 +38,18 @@ CORES_TIPO = {
 }
 
 
-@st.cache_data
+@st.cache_data(persist="disk")
 def carregar_df(caminho: str = CSV_PADRAO) -> pl.DataFrame:
     return preprocessar(pl.read_csv(caminho, separator=";"))
 
 
-@st.cache_data
+@st.cache_data(persist="disk")
 def listar_atletas(caminho: str = CSV_PADRAO) -> list[int]:
     df = carregar_df(caminho)
     return sorted(df[COL_ATHLETE].unique().to_list())
 
 
-@st.cache_data
+@st.cache_data(persist="disk")
 def tabela_perfil_regras(caminho: str = CSV_PADRAO) -> pl.DataFrame:
     return definir_perfil_atleta(carregar_df(caminho), verbose=False)
 
@@ -99,6 +94,12 @@ def distribuicao_vs_meta(
 
 
 def grafico_distribuicao(atual: dict, meta: dict):
+    import matplotlib
+
+    matplotlib.use("Agg")
+
+    import matplotlib.pyplot as plt
+
     tipos = list(meta.keys())
     valores_atual = [atual.get(t, 0.0) * 100 for t in tipos]
     valores_meta = [meta[t] * 100 for t in tipos]
@@ -142,7 +143,7 @@ def _construir_tabela_atletas(
     )
 
 
-@st.cache_data
+@st.cache_data(persist="disk")
 def tabela_atletas(caminho: str = CSV_PADRAO) -> pl.DataFrame:
     return _construir_tabela_atletas(
         carregar_df(caminho), tabela_perfil_regras(caminho)
@@ -167,3 +168,153 @@ def recomendacao_regras(df: pl.DataFrame, athlete_id: int) -> dict:
     if resultado.recomendacoes is None or resultado.recomendacoes.height == 0:
         return {}
     return resultado.recomendacoes.row(0, named=True)
+
+
+# ---------------------------------------------------------------------------
+# Loaders para as páginas portadas dos notebooks (dataset, clusters, modelos).
+# Imports pesados (sklearn/xgboost) ficam dentro das funções (ADR-012).
+# ---------------------------------------------------------------------------
+
+
+@st.cache_data(persist="disk")
+def carregar_df_raw(caminho: str = CSV_PADRAO) -> pl.DataFrame:
+    return pl.read_csv(caminho, separator=";")
+
+
+@st.cache_data(persist="disk")
+def perfil_multidim(caminho: str = CSV_PADRAO) -> pl.DataFrame:
+    from dataset.analise import montar_perfil_multidim
+
+    return montar_perfil_multidim(carregar_df(caminho))
+
+
+@st.cache_data(persist="disk")
+def clusters_por_genero(caminho: str = CSV_PADRAO) -> tuple[pl.DataFrame, dict]:
+    from dataset.categorizar.kmeans import treina_kmeans_por_genero
+    from dataset.categorizar.nomear_clusters import nomear_categorias
+
+    resultado = treina_kmeans_por_genero(
+        carregar_df(caminho),
+        features=[COL_DISTANCE, COL_PACE],
+        n_clusters=2,
+        plotar=False,
+        verbose=False,
+    )
+    perfil = nomear_categorias(resultado.df_exibir)
+    return perfil, resultado.detalhes
+
+
+@st.cache_data(persist="disk")
+def tabela_clusters(caminho: str = CSV_PADRAO) -> pl.DataFrame:
+    from dataset.categorizar.nomear_clusters import tabela_descritiva_clusters
+
+    perfil, _ = clusters_por_genero(caminho)
+    return tabela_descritiva_clusters(perfil)
+
+
+@st.cache_data(persist="disk")
+def fichas_atletas(caminho: str = CSV_PADRAO) -> pl.DataFrame:
+    from dataset.categorizar.visualizacao_fichas import montar_fichas_atletas
+
+    perfil, _ = clusters_por_genero(caminho)
+    return montar_fichas_atletas(perfil)
+
+
+# Combinações de features testadas para justificar a escolha do KMeans.
+COMBINACOES_CLUSTER = {
+    "dist_pace": [COL_DISTANCE, COL_PACE],
+    "dist_pace_freq": [COL_DISTANCE, COL_PACE, COL_FREQUENCIA],
+    "dist_pace_fc_freq": [COL_DISTANCE, COL_PACE, COL_HR, COL_FREQUENCIA],
+    "dist_pace_fc_freq_ncorr": [
+        COL_DISTANCE,
+        COL_PACE,
+        COL_HR,
+        COL_FREQUENCIA,
+        COL_N_CORRIDAS,
+    ],
+}
+
+
+@st.cache_data(persist="disk")
+def comparacao_features_k(
+    caminho: str = CSV_PADRAO,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Grid combinação × k × gênero + sugestão automática (justifica dist_pace, k=2)."""
+    from dataset.categorizar.comparar_features import (
+        comparar_combinacoes_e_k,
+        sugerir_melhor_config,
+    )
+
+    grid = comparar_combinacoes_e_k(
+        carregar_df(caminho), COMBINACOES_CLUSTER, ks=(2, 3, 4)
+    )
+    sugestoes = sugerir_melhor_config(grid, min_cluster=5)
+    return grid, sugestoes
+
+
+@st.cache_data(persist="disk")
+def grid_k_por_genero(caminho: str = CSV_PADRAO) -> dict[str, pl.DataFrame]:
+    """Métricas internas para k=2..7 por gênero (justifica o k=2 final)."""
+    from dataset.categorizar.perfil_atletas import montar_perfil_atletas
+    from dataset.categorizar.validacao_cluster import avaliar_k
+
+    perfil_base = montar_perfil_atletas(carregar_df(caminho)).with_columns(
+        pl.col(COL_GENDER).cast(pl.Utf8).str.strip_chars().str.to_uppercase()
+    )
+    grids: dict[str, pl.DataFrame] = {}
+    for genero in ("M", "F"):
+        subset = perfil_base.filter(pl.col(COL_GENDER) == genero)
+        grids[genero] = avaliar_k(subset, [COL_DISTANCE, COL_PACE], ks=range(2, 8))
+    return grids
+
+
+@st.cache_data(persist="disk")
+def validacao_clusters(caminho: str = CSV_PADRAO) -> dict:
+    """Validação interna, estabilidade (ARI) e externa (vs perfil por regras)."""
+    from dataset.categorizar.kmeans import treina_kmeans_por_genero
+    from dataset.categorizar.nomear_clusters import nomear_categorias
+    from dataset.categorizar.validacao_cluster import validar_resultado_kmeans
+
+    df = carregar_df(caminho)
+    features = [COL_DISTANCE, COL_PACE]
+    resultado = treina_kmeans_por_genero(
+        df, features=features, n_clusters=2, plotar=False, verbose=False
+    )
+    resultado.df_exibir = nomear_categorias(resultado.df_exibir)
+    resultado = validar_resultado_kmeans(resultado, df=df, features=features)
+    return resultado.detalhes
+
+
+@st.cache_data(persist="disk")
+def silhouette_amostras(caminho: str = CSV_PADRAO) -> pl.DataFrame:
+    """Silhouette individual por atleta (identifica atletas na fronteira)."""
+    from dataset.categorizar.validacao_cluster import silhouette_por_amostra
+
+    perfil, _ = clusters_por_genero(caminho)
+    return silhouette_por_amostra(perfil, features=[COL_DISTANCE, COL_PACE])
+
+
+@st.cache_data(persist="disk")
+def executar_modelos(caminho: str = CSV_PADRAO) -> dict:
+    from dataset.models.previsao_pace.linear_regression import treina_linear_regression
+    from dataset.models.previsao_pace.random_forest import treina_random_forest
+    from dataset.models.previsao_pace.random_forest_regressor import (
+        treina_random_forest_regressor,
+    )
+    from dataset.models.previsao_tempo.random_forest import treina_random_tempo
+    from dataset.models.previsao_tempo.regressao_linear import treina_regressao_tempo
+    from dataset.models.previsao_tempo.xboost import treina_xboost_tempo
+    from dataset.models.previsao_treino.model import treina_modelo
+    from dataset.models.previsao_treino.random_forest import treina_rf_recomendacao
+
+    df = carregar_df(caminho)
+    return {
+        "lr_pace": treina_linear_regression(df, plotar=False, verbose=False),
+        "rf_pace": treina_random_forest(df, plotar=False, verbose=False),
+        "rf_pace_regressor": treina_random_forest_regressor(df, plotar=False, verbose=False),
+        "lr_tempo": treina_regressao_tempo(df, plotar=False, verbose=False),
+        "rf_tempo": treina_random_tempo(df, plotar=False, verbose=False),
+        "xbt_tempo": treina_xboost_tempo(df, plotar=False, verbose=False),
+        "regras": treina_modelo(df, plotar=False, verbose=False),
+        "rf_treino": treina_rf_recomendacao(df, plotar=False, verbose=False),
+    }

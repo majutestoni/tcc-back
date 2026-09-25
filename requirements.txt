@@ -1,0 +1,8 @@
+polars
+numpy
+scikit-learn
+matplotlib
+xgboost
+jupyter
+google-genai
+streamlit

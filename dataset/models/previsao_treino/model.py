@@ -1,7 +1,5 @@
 from dataset.constants import *
 import polars as pl
-import matplotlib.pyplot as plt
-import numpy as np
 
 META = {
     "leve": 0.60,
@@ -249,6 +247,9 @@ def plotar_recomendacao_atleta(
     col_tipo: str = COL_TIPO_TREINO,
     meta: dict[str, float] | None = None,
 ) -> None:
+    import matplotlib.pyplot as plt
+    import numpy as np
+
     meta_uso = meta if meta is not None else META
     df_janela = filtrar_janela_temporal(df)
     distribuicao = distribuicao_por_atleta(df_janela, col_tipo)
@@ -287,6 +288,8 @@ def plotar_recomendacao_atleta(
 
 
 def plotar_resumo_recomendacoes(resultado: pl.DataFrame) -> None:
+    import matplotlib.pyplot as plt
+
     contagem = (
         resultado.group_by("tipo")
         .agg(pl.len().alias("qtd"))

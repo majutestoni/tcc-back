@@ -11,3 +11,6 @@ __pycache__/
 
 # SO
 .DS_Store
+
+# Streamlit — cache persistido em disco (@st.cache_data persist="disk")
+.streamlit/cache/

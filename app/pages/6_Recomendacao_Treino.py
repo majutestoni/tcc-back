@@ -91,6 +91,12 @@ if st.button("Recomendar via Gemini", type="primary"):
             st.error(f"Erro ao chamar o Gemini: {erro}")
             st.stop()
 
+    from gemini.historico import salvar_recomendacao
+
+    salvar_recomendacao(athlete_id, rec, origem="gemini")
+    if rec_regras:
+        salvar_recomendacao(athlete_id, rec_regras, origem="regras")
+
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Tipo", rec.tipo)
     c2.metric("Distância (km)", rec.distancia_km)
@@ -103,3 +109,6 @@ if st.button("Recomendar via Gemini", type="primary"):
         st.markdown("**Alertas**")
         for alerta in rec.alertas:
             st.warning(alerta)
+    st.success(
+        "Recomendações (Gemini e por regras) salvas no Histórico de recomendações."
+    )
