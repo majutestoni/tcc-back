@@ -37,19 +37,27 @@ def imputar_frequencia_cardiaca(
 
     return df
 
-def filtrar_corridas_validas(df: pl.DataFrame) -> pl.DataFrame:
+def filtrar_corridas_validas(df: pl.DataFrame, usar_fc: bool | None = None) -> pl.DataFrame:
     """
     Remove corridas com:
     - distância muito pequena
     - pace irreal
-    - frequência cardíaca inválida
-    """
+    - frequência cardíaca inválida (apenas quando a fonte tem FC)
 
-    df = df.with_columns([
+    `usar_fc=None` detecta automaticamente. Sem essa checagem, uma fonte sem FC
+    (ADR-018) zeraria o dataset: `FC > 40` em nulo resulta em nulo e descarta tudo.
+    """
+    if usar_fc is None:
+        usar_fc = tem_frequencia_cardiaca(df)
+
+    casts = [
         pl.col(COL_DISTANCE).cast(pl.Float64, strict=False),
         pl.col(COL_ELAPSED).cast(pl.Float64, strict=False),
-        pl.col(COL_HR).cast(pl.Float64, strict=False),
-    ])
+    ]
+    if COL_HR in df.columns:
+        casts.append(pl.col(COL_HR).cast(pl.Float64, strict=False))
+
+    df = df.with_columns(casts)
 
     # Remove distâncias menores que 1 km
     df = df.filter(
@@ -65,38 +73,63 @@ def filtrar_corridas_validas(df: pl.DataFrame) -> pl.DataFrame:
     )
 
     # Remove valores irreais
-    df = df.filter(
-        (pl.col(COL_PACE) > 2) &
-        (pl.col(COL_PACE) < 15) &
-        (pl.col(COL_HR) > 40) &
-        (pl.col(COL_HR) < 220)
-    )
+    condicao = (pl.col(COL_PACE) > 2) & (pl.col(COL_PACE) < 15)
+    if usar_fc:
+        condicao = condicao & (pl.col(COL_HR) > 40) & (pl.col(COL_HR) < 220)
 
-    return df
+    return df.filter(condicao)
 
-def classificar_tipo_treino(df: pl.DataFrame) -> pl.DataFrame:
+def tem_frequencia_cardiaca(df: pl.DataFrame) -> bool:
+    """
+    Indica se a FC carrega informação usável: coluna presente, não toda nula
+    e com variação. Fonte sem FC (ADR-018) ou preenchida com constante não passa.
+    """
+    if COL_HR not in df.columns:
+        return False
+
+    fc = df[COL_HR].cast(pl.Float64, strict=False)
+    if fc.null_count() == df.height:
+        return False
+
+    return (fc.n_unique() > 1) and bool(fc.std() or 0.0)
+
+
+def classificar_tipo_treino(df: pl.DataFrame, usar_fc: bool | None = None) -> pl.DataFrame:
     """
     Classifica cada corrida em: leve, longao, ritmo ou intervalado.
-    Usa pace relativo ao atleta, distância e FC.
+    Usa pace relativo ao atleta, distância e — quando disponível — FC.
+
+    `usar_fc=None` detecta automaticamente. Em fontes sem FC (ADR-018) a regra de
+    `intervalado` cai para o critério de pace apenas.
     """
-    df = df.with_columns([
+    if usar_fc is None:
+        usar_fc = tem_frequencia_cardiaca(df)
+
+    agregados = [
         pl.col(COL_PACE).mean().over(COL_ATHLETE).alias("_pace_medio"),
         pl.col(COL_PACE).std().over(COL_ATHLETE).alias("_pace_std"),
         pl.col(COL_DISTANCE).quantile(LIMIAR_DIST_LONGAO).over(COL_ATHLETE).alias("_dist_p75"),
-        pl.col(COL_HR).median().over(COL_ATHLETE).alias("_hr_mediana"),
-    ])
+    ]
+    if usar_fc:
+        agregados.append(pl.col(COL_HR).median().over(COL_ATHLETE).alias("_hr_mediana"))
+
+    df = df.with_columns(agregados)
 
     df = df.with_columns(
         pl.col("_pace_std").fill_null(0.5)
     )
 
+    pace_rapido = (
+        pl.col(COL_PACE) < pl.col("_pace_medio") - LIMIAR_PACE_INTERVALADO * pl.col("_pace_std")
+    )
+    eh_intervalado = (
+        pace_rapido & (pl.col(COL_HR) >= pl.col("_hr_mediana")) if usar_fc else pace_rapido
+    )
+
     df = df.with_columns(
         pl.when(pl.col(COL_DISTANCE) >= pl.col("_dist_p75"))
         .then(pl.lit("longao"))
-        .when(
-            (pl.col(COL_PACE) < pl.col("_pace_medio") - LIMIAR_PACE_INTERVALADO * pl.col("_pace_std"))
-            & (pl.col(COL_HR) >= pl.col("_hr_mediana"))
-        )
+        .when(eh_intervalado)
         .then(pl.lit("intervalado"))
         .when(pl.col(COL_PACE) > pl.col("_pace_medio") + LIMIAR_PACE_LEVE * pl.col("_pace_std"))
         .then(pl.lit("leve"))
@@ -109,7 +142,10 @@ def classificar_tipo_treino(df: pl.DataFrame) -> pl.DataFrame:
         .alias(COL_TIPO_TREINO)
     )
 
-    return df.drop("_pace_medio", "_pace_std", "_dist_p75", "_hr_mediana")
+    auxiliares = ["_pace_medio", "_pace_std", "_dist_p75"]
+    if usar_fc:
+        auxiliares.append("_hr_mediana")
+    return df.drop(auxiliares)
 
 def formatar_pace(pace_decimal: float, sufixo: str = "/km") -> str:
     """Converte pace decimal (ex.: 6.67) para min:seg (ex.: 6:40/km)."""
@@ -136,8 +172,15 @@ def formatar_delta_pace(delta_decimal: float) -> str:
 
 
 def preprocessar(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Pipeline fixo de ADR-003. A presença de FC é detectada uma única vez e
+    propagada, para que fontes com e sem FC (ADR-018) sigam o mesmo caminho.
+    """
+    usar_fc = tem_frequencia_cardiaca(df)
+
     df = filtrar_genero_valido(df)
-    df = imputar_frequencia_cardiaca(df)
-    df = filtrar_corridas_validas(df)
-    df = classificar_tipo_treino(df)
+    if usar_fc:
+        df = imputar_frequencia_cardiaca(df)
+    df = filtrar_corridas_validas(df, usar_fc=usar_fc)
+    df = classificar_tipo_treino(df, usar_fc=usar_fc)
     return df

@@ -30,6 +30,18 @@ st.markdown(
     """
 )
 
+st.warning(
+    """
+    **As métricas desta tela usam o protocolo original** — `train_test_split`
+    aleatório **por corrida**, que coloca o mesmo atleta em treino e teste e
+    infla o desempenho (ADR-017). Elas são mantidas para preservar a paridade
+    com o notebook.
+
+    Para os números corrigidos (particionamento por atleta, intervalos de
+    confiança e testes pareados), veja a tela **🔬 Protocolo Experimental**.
+    """
+)
+
 with st.spinner("Treinando modelos (cacheado após a 1ª execução)…"):
     resultados = executar_modelos()
 

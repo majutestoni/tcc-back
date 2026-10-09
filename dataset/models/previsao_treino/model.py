@@ -98,15 +98,24 @@ def recomendar_proximo_treino(
     ultimos_treinos: list[str],
     pace_medio_atleta: float,
     parametros: dict | None = None,
+    pesos: dict[str, float] | None = None,
+    usar_antifadiga: bool = True,
 ) -> dict:
+    """
+    Escolhe o tipo de maior déficit ponderado, com guarda anti-fadiga.
+
+    `pesos` e `usar_antifadiga` existem para a ablação de ADR-017; os padrões
+    reproduzem exatamente o comportamento de ADR-007.
+    """
     params_map = parametros or PARAMETROS
+    pesos_uso = pesos if pesos is not None else PESOS_DEFICIT
 
     deficits_ponderados = {
-        tipo: deficits[tipo] * PESOS_DEFICIT[tipo] for tipo in deficits
+        tipo: deficits[tipo] * pesos_uso.get(tipo, 1.0) for tipo in deficits
     }
     tipo = max(deficits_ponderados, key=deficits_ponderados.get)
 
-    if ultimos_treinos:
+    if usar_antifadiga and ultimos_treinos:
         ultimo = ultimos_treinos[-1]
         if ultimo == "intervalado" and tipo in ("intervalado", "longao"):
             tipo = "leve"

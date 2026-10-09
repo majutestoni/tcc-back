@@ -1,8 +1,10 @@
 polars
 numpy
+scipy
 scikit-learn
 matplotlib
 xgboost
 jupyter
 google-genai
 streamlit
+pytest

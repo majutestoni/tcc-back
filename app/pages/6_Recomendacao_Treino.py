@@ -8,8 +8,10 @@ import streamlit as st
 from app.shared import (
     carregar_df,
     distribuicao_vs_meta,
+    distribuicao_vs_meta_cluster,
     grafico_distribuicao,
     listar_atletas,
+    recomendacao_cluster_atleta,
     recomendacao_regras,
     resumo_atleta,
     tabela_perfil_regras,
@@ -63,7 +65,7 @@ col_d.write(ultimos or "—")
 col_d.markdown("**Déficits vs meta**")
 col_d.write({tipo: round(valor, 3) for tipo, valor in deficits.items()})
 
-st.subheader("Recomendação por regras")
+st.subheader("Recomendação por regras (meta global)")
 rec_regras = recomendacao_regras(df, athlete_id)
 if rec_regras:
     c1, c2, c3, c4 = st.columns(4)
@@ -74,6 +76,33 @@ if rec_regras:
     st.caption(rec_regras["descricao"])
 else:
     st.info("Sem recomendação por regras para este atleta.")
+
+st.divider()
+st.subheader("Recomendação por cluster")
+st.caption(
+    "Meta e parâmetros calibrados no perfil KMeans do atleta "
+    "(ver página **Recomendação por Cluster**)."
+)
+rec_cluster = recomendacao_cluster_atleta(athlete_id)
+if rec_cluster:
+    st.markdown(
+        f"**Cluster:** {rec_cluster.get('rotulo_cluster', '—')} "
+        f"(`{rec_cluster.get('perfil_cluster', '—')}`)"
+    )
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Tipo", rec_cluster["tipo"])
+    c2.metric("Distância (km)", rec_cluster["distancia_km"])
+    c3.metric("Pace alvo (min/km)", rec_cluster["pace_alvo_min_km"])
+    c4.metric("Tempo estimado (min)", rec_cluster["tempo_estimado_min"])
+    st.caption(rec_cluster.get("descricao", ""))
+
+    atual_c, meta_c, deficits_c, _, _ = distribuicao_vs_meta_cluster(df, athlete_id)
+    col_g, col_d = st.columns([2, 1])
+    col_g.pyplot(grafico_distribuicao(atual_c, meta_c))
+    col_d.markdown("**Déficits vs meta do cluster**")
+    col_d.write({tipo: round(valor, 3) for tipo, valor in deficits_c.items()})
+else:
+    st.info("Sem recomendação por cluster para este atleta.")
 
 st.divider()
 st.subheader("Recomendação via Gemini")
