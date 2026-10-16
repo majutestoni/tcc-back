@@ -84,23 +84,32 @@ def bloco_baselines(args: argparse.Namespace) -> None:
     """ADR-017 item 2: baselines e ablação."""
     from dataset.avaliacao.estatistica import comparar_todos
     from dataset.experimentos.ablacao import rodar_ablacao
-    from dataset.experimentos.baselines import baselines_padrao
+    from dataset.experimentos.baselines import (
+        NOME_REGRA_META_CLUSTER,
+        baselines_com_cluster,
+    )
     from dataset.experimentos.protocolo_recomendacao import (
         avaliar_recomendador,
         montar_casos,
         tabela_recomendadores,
     )
+    from dataset.constants import COL_ATHLETE
+    from dataset.models.previsao_treino.recomendacao_cluster import montar_perfil_cluster
 
     df = _carregar_primaria()
     casos = montar_casos(df, n_teste=args.n_teste)
     print(f"casos de teste por origem rolante: {len(casos)}")
 
-    from dataset.experimentos.baselines import NOME_REGRA_META_GLOBAL
+    perfil = montar_perfil_cluster(df)
+    mapa_cluster = {
+        int(row[COL_ATHLETE]): str(row["perfil_cluster"])
+        for row in perfil.select(COL_ATHLETE, "perfil_cluster").iter_rows(named=True)
+    }
 
-    _titulo("ITEM 2 — BASELINES vs DÉFICIT VS META GLOBAL")
+    _titulo("ITEM 2 — BASELINES vs DÉFICIT VS META DO CLUSTER")
     resultados = [
         avaliar_recomendador(casos, nome, rec)
-        for nome, rec in baselines_padrao().items()
+        for nome, rec in baselines_com_cluster(mapa_cluster).items()
     ]
     print(tabela_recomendadores(resultados, em_percentual=True))
     print(
@@ -110,8 +119,8 @@ def bloco_baselines(args: argparse.Namespace) -> None:
         "Valores da tabela em %."
     )
 
-    _titulo("ITEM 2 — TESTES PAREADOS CONTRA DÉFICIT VS META GLOBAL")
-    alvo = NOME_REGRA_META_GLOBAL
+    _titulo("ITEM 2 — TESTES PAREADOS CONTRA DÉFICIT VS META DO CLUSTER")
+    alvo = NOME_REGRA_META_CLUSTER
     for c in comparar_todos({r.nome: r.erro_por_atleta for r in resultados}):
         if alvo in (c.modelo_a, c.modelo_b):
             outro = c.modelo_b if c.modelo_a == alvo else c.modelo_a

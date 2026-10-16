@@ -11,7 +11,6 @@ from dataset.constants import (
 )
 from dataset.experimentos.baselines import (
     NOME_REGRA_META_CLUSTER,
-    NOME_REGRA_META_GLOBAL,
     baselines_com_cluster,
     baselines_padrao,
     recomendador_cluster,
@@ -165,16 +164,16 @@ def test_tabela_recomendadores_ordena_por_f1():
 def test_baselines_padrao_cobre_o_conjunto_esperado():
     nomes = baselines_padrao()
 
-    assert NOME_REGRA_META_GLOBAL in nomes
+    assert NOME_REGRA_META_CLUSTER not in nomes
     assert "sempre_leve" in nomes
-    assert len(nomes) == 7
+    assert len(nomes) == 6
 
 
 def test_baselines_com_cluster_inclui_meta_do_cluster():
     nomes = baselines_com_cluster({1: "volume_alto"})
 
     assert NOME_REGRA_META_CLUSTER in nomes
-    assert len(nomes) == 8
+    assert len(nomes) == 7
 
 
 def test_recomendador_cluster_usa_meta_do_perfil():

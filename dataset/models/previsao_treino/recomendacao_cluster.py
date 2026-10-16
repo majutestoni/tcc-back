@@ -2,16 +2,29 @@ from __future__ import annotations
 
 import polars as pl
 
-from dataset.constants import COL_ATHLETE, COL_TIPO_TREINO, SEMANAS_JANELA
+from dataset.constants import (
+    COL_ATHLETE,
+    COL_DISTANCE,
+    COL_PACE,
+    COL_TIPO_TREINO,
+    SEMANAS_JANELA,
+)
 from dataset.models.previsao_treino.model import (
-    META,
     PARAMETROS,
+    PESOS_DEFICIT,
     _gerar_recomendacoes,
     calibrar_parametros,
     distribuicao_por_atleta,
     filtrar_janela_temporal,
 )
-from dataset.preprocessamento import formatar_pace
+from dataset.preprocessamento import formatar_delta_pace, formatar_pace
+
+NOMES_TIPO = {
+    "leve": "leve (regenerativo)",
+    "longao": "longão",
+    "ritmo": "ritmo",
+    "intervalado": "intervalado",
+}
 
 META_POR_PERFIL: dict[str, dict[str, float]] = {
     "volume_alto": {
@@ -27,6 +40,47 @@ META_POR_PERFIL: dict[str, dict[str, float]] = {
         "intervalado": 0.05,
     },
 }
+
+# Fallback quando o atleta ainda não tem perfil_cluster (ADR-024: sem meta global).
+META_CLUSTER_PADRAO = META_POR_PERFIL["volume_moderado"]
+
+
+def meta_para_perfil(chave: str | None) -> dict[str, float]:
+    """Meta de distribuição do perfil_cluster; sem chave → volume_moderado."""
+    if chave and chave in META_POR_PERFIL:
+        return META_POR_PERFIL[chave]
+    return META_CLUSTER_PADRAO
+
+
+def chave_perfil_cluster(perfil: pl.DataFrame, athlete_id: int) -> str | None:
+    """Lê `perfil_cluster` do atleta num DataFrame de perfil já nomeado."""
+    if perfil.height == 0 or "perfil_cluster" not in perfil.columns:
+        return None
+    info = perfil.filter(pl.col(COL_ATHLETE) == athlete_id)
+    if info.height == 0:
+        return None
+    return info["perfil_cluster"][0]
+
+
+def montar_perfil_cluster(df: pl.DataFrame) -> pl.DataFrame:
+    """KMeans por gênero + nomeação (mesmo pipeline da demo Streamlit)."""
+    from dataset.categorizar.kmeans import treina_kmeans_por_genero
+    from dataset.categorizar.nomear_clusters import nomear_categorias
+
+    resultado = treina_kmeans_por_genero(
+        df,
+        features=[COL_DISTANCE, COL_PACE],
+        n_clusters=2,
+        plotar=False,
+        verbose=False,
+    )
+    return nomear_categorias(resultado.df_exibir)
+
+
+def meta_do_atleta(df: pl.DataFrame, athlete_id: int) -> dict[str, float]:
+    """Meta do cluster do atleta (volume_moderado se sem perfil)."""
+    perfil = montar_perfil_cluster(df)
+    return meta_para_perfil(chave_perfil_cluster(perfil, athlete_id))
 
 
 def calibrar_parametros_por_perfil(
@@ -85,7 +139,7 @@ def gerar_recomendacoes_por_cluster(
         if info.height == 0:
             continue
         chave = info["perfil_cluster"][0]
-        meta = META_POR_PERFIL.get(chave, META)
+        meta = meta_para_perfil(chave)
         parametros = params_por_perfil.get(chave) or {
             k: v.copy() for k, v in PARAMETROS.items()
         }
@@ -110,6 +164,217 @@ def gerar_recomendacoes_por_cluster(
     if not blocos:
         return pl.DataFrame()
     return pl.concat(blocos).sort(COL_ATHLETE)
+
+
+def _pct(fracao: float) -> str:
+    return f"{fracao * 100:.0f}%"
+
+
+def _tipo_maior_deficit(
+    deficits: dict[str, float],
+    pesos: dict[str, float] | None = None,
+) -> str:
+    pesos_uso = pesos if pesos is not None else PESOS_DEFICIT
+    return max(deficits, key=lambda t: deficits[t] * pesos_uso.get(t, 1.0))
+
+
+def _mediana_dist_km(
+    corridas: pl.DataFrame | None,
+    tipo: str,
+    col_tipo: str = "tipo",
+    col_dist: str = "distancia_km",
+) -> float | None:
+    if corridas is None or corridas.height == 0:
+        return None
+    if col_tipo not in corridas.columns or col_dist not in corridas.columns:
+        return None
+    sub = corridas.filter(pl.col(col_tipo) == tipo)
+    if sub.height == 0:
+        return None
+    return round(float(sub[col_dist].median()), 1)
+
+
+def explicar_recomendacao(
+    *,
+    rec: dict,
+    atual: dict[str, float],
+    meta: dict[str, float],
+    deficits: dict[str, float],
+    ultimos: list[str],
+    corridas_janela: pl.DataFrame | None = None,
+    info_cluster: dict | None = None,
+    parametros_tipo: dict | None = None,
+) -> str:
+    """
+    Texto descritivo do porquê da recomendação (tipo, distância, pace, tempo)
+    para aquele atleta — sem jargão de ADR.
+    """
+    if not rec or "tipo" not in rec:
+        return ""
+
+    tipo = rec["tipo"]
+    nome = NOMES_TIPO.get(tipo, tipo)
+    info = info_cluster or {}
+    rotulo = (
+        info.get("rotulo_cluster")
+        or rec.get("rotulo_cluster")
+        or info.get("perfil_cluster")
+        or "seu cluster"
+    )
+    perfil_chave = info.get("perfil_cluster") or rec.get("perfil_cluster") or ""
+
+    tipo_bruto = _tipo_maior_deficit(deficits) if deficits else tipo
+    atual_pct = atual.get(tipo, 0.0)
+    meta_pct = meta.get(tipo, 0.0)
+    deficit_tipo = deficits.get(tipo, meta_pct - atual_pct)
+
+    partes: list[str] = []
+
+    # --- Tipo ---
+    if deficit_tipo > 0.01:
+        partes.append(
+            f"**Tipo — {nome}.** Nas últimas {SEMANAS_JANELA} semanas, cerca de "
+            f"{_pct(atual_pct)} das corridas foram `{tipo}`, enquanto a meta do "
+            f"cluster **{rotulo}** pede {_pct(meta_pct)}. O déficit "
+            f"({_pct(deficit_tipo)}) é o maior entre os tipos, então o próximo "
+            f"treino prioriza **{nome}**."
+        )
+    elif deficit_tipo < -0.01:
+        partes.append(
+            f"**Tipo — {nome}.** Você já está acima da meta de `{tipo}` "
+            f"({_pct(atual_pct)} vs {_pct(meta_pct)} no cluster **{rotulo}**). "
+            f"Ainda assim o algoritmo apontou **{nome}** "
+            f"(em geral por empate ou pela regra anti-fadiga)."
+        )
+    else:
+        partes.append(
+            f"**Tipo — {nome}.** A distribuição na janela está próxima da meta "
+            f"do cluster **{rotulo}** ({_pct(atual_pct)} vs {_pct(meta_pct)} "
+            f"de `{tipo}`). O próximo treino segue como **{nome}**."
+        )
+
+    if tipo_bruto != tipo and ultimos:
+        ultimo = ultimos[-1]
+        nome_bruto = NOMES_TIPO.get(tipo_bruto, tipo_bruto)
+        partes.append(
+            f"O déficit puro apontava **{nome_bruto}**, mas o último treino da "
+            f"janela foi `{ultimo}`: a guarda anti-fadiga evita repetir longão/"
+            f"intervalado pesado e troca para **{nome}**."
+        )
+    elif ultimos:
+        partes.append(
+            f"O último treino na janela foi `{ultimos[-1]}` — a regra "
+            f"anti-fadiga não bloqueou este `{tipo}`."
+        )
+
+    if perfil_chave:
+        partes.append(
+            f"A meta usada é a do perfil `{perfil_chave}` "
+            f"(leve {_pct(meta.get('leve', 0))}, longão {_pct(meta.get('longao', 0))}, "
+            f"ritmo {_pct(meta.get('ritmo', 0))}, intervalado "
+            f"{_pct(meta.get('intervalado', 0))})."
+        )
+
+    # --- Distância ---
+    dist = float(rec.get("distancia_km") or 0)
+    params = parametros_tipo or PARAMETROS.get(tipo, {})
+    faixa = params.get("distancia_km")
+    med_janela = _mediana_dist_km(corridas_janela, tipo)
+    med_geral_janela = None
+    if corridas_janela is not None and corridas_janela.height > 0:
+        if "distancia_km" in corridas_janela.columns:
+            med_geral_janela = round(float(corridas_janela["distancia_km"].median()), 1)
+
+    if faixa and len(faixa) == 2:
+        d_min, d_max = faixa
+        trecho_faixa = (
+            f"ponto médio da faixa calibrada nos longões/corridas `{tipo}` "
+            f"do cluster (**{d_min:.1f}–{d_max:.1f} km**)"
+            if tipo == "longao"
+            else (
+                f"ponto médio da faixa calibrada nas corridas `{tipo}` "
+                f"do cluster (**{d_min:.1f}–{d_max:.1f} km**)"
+            )
+        )
+    else:
+        trecho_faixa = "valor calibrado no histórico do cluster"
+
+    trecho_atleta = ""
+    if med_janela is not None:
+        trecho_atleta = (
+            f" Nas suas corridas `{tipo}` desta janela, a distância mediana "
+            f"fica em torno de **{med_janela:.1f} km**"
+        )
+        if med_geral_janela is not None and tipo == "longao":
+            trecho_atleta += (
+                f"; nas demais corridas da janela a mediana é "
+                f"**{med_geral_janela:.1f} km** — o longão recomenda um volume "
+                f"maior que o dia a dia"
+            )
+        trecho_atleta += "."
+    elif med_geral_janela is not None:
+        trecho_atleta = (
+            f" Nesta janela você não tem corrida classificada como `{tipo}`; "
+            f"suas corridas recentes ficam em torno de **{med_geral_janela:.1f} km** "
+            f"de mediana."
+        )
+
+    partes.append(
+        f"**Distância — {dist:.1f} km.** Esse alvo é o {trecho_faixa}."
+        f"{trecho_atleta}"
+    )
+
+    # --- Pace ---
+    pace_alvo = float(rec.get("pace_alvo_min_km") or 0)
+    pace_medio = None
+    if corridas_janela is not None and corridas_janela.height > 0:
+        if "pace_min_km" in corridas_janela.columns:
+            pace_medio = float(corridas_janela["pace_min_km"].mean())
+
+    offset = params.get("pace_offset_min")
+    if offset is None and pace_medio is not None:
+        offset = round(pace_alvo - pace_medio, 2)
+
+    if pace_medio is not None and offset is not None:
+        if offset > 0.05:
+            sentido = (
+                f"mais lento que a sua média ({formatar_delta_pace(offset)}) — "
+                f"ritmo confortável / regenerativo"
+            )
+        elif offset < -0.05:
+            sentido = (
+                f"mais rápido que a sua média ({formatar_delta_pace(offset)}) — "
+                f"estímulo de velocidade"
+            )
+        else:
+            sentido = "próximo do seu pace médio (treino de ritmo)"
+
+        partes.append(
+            f"**Pace alvo — {formatar_pace(pace_alvo)}.** Seu pace médio na "
+            f"janela é **{formatar_pace(pace_medio)}**. Para `{tipo}`, o "
+            f"offset do cluster deixa o alvo **{sentido}**, resultando em "
+            f"**{formatar_pace(pace_alvo)}**."
+        )
+    else:
+        partes.append(
+            f"**Pace alvo — {formatar_pace(pace_alvo)}.** Calculado a partir "
+            f"do pace médio do atleta na janela mais o offset calibrado para "
+            f"`{tipo}` no cluster."
+        )
+
+    # --- Tempo ---
+    tempo = float(rec.get("tempo_estimado_min") or dist * pace_alvo)
+    partes.append(
+        f"**Tempo estimado — ~{tempo:.0f} min.** É simplesmente "
+        f"**{dist:.1f} km × {formatar_pace(pace_alvo)}** "
+        f"(distância × pace alvo), para dimensionar a sessão."
+    )
+
+    descricao = rec.get("descricao") or params.get("descricao")
+    if descricao:
+        partes.append(f"_{descricao}._")
+
+    return "\n\n".join(partes)
 
 
 def comparar_recomendacoes(
@@ -177,8 +442,7 @@ def exibir_card_recomendacao(
     row = row_df.row(0, named=True)
     meta_uso = meta
     if meta_uso is None:
-        chave = row.get("perfil_cluster")
-        meta_uso = META_POR_PERFIL.get(chave, META) if chave else META
+        meta_uso = meta_para_perfil(row.get("perfil_cluster"))
 
     df_janela = filtrar_janela_temporal(df)
     dist = distribuicao_por_atleta(df_janela, col_tipo).filter(

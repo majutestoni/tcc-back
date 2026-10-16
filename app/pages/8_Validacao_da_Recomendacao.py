@@ -12,21 +12,37 @@ import polars as pl
 import streamlit as st
 
 from app.shared import ablacao_adr007, avaliacao_protocolo, comparacao_baselines
-from dataset.experimentos.baselines import (
-    NOME_REGRA_META_CLUSTER,
-    NOME_REGRA_META_GLOBAL,
+from dataset.experimentos.baselines import NOME_REGRA_META_CLUSTER
+
+st.set_page_config(
+    page_title="Validação da recomendação", page_icon="🔬", layout="wide"
 )
 
-st.set_page_config(page_title="Protocolo Experimental", page_icon="🔬", layout="wide")
-
-st.title("🔬 Protocolo Experimental")
+st.title("Validação da recomendação")
+st.subheader("A regra funciona?")
 st.markdown(
     """
-    **Foco desta tela:** validar a **recomendação de treino** — a regra por
-    **déficit vs meta global** e a por **déficit vs meta do cluster** — contra
-    baselines triviais.
+    **Experimentos — recomendação vs baselines.** Aqui medimos se a regra de
+    produto (**déficit vs meta do cluster**) supera chutes triviais
+    (“sempre leve”, “repete o último”, etc.).
 
-    Os modelos de pace/tempo ficam na última aba (são auxiliares).
+    Não é a tela que **gera** o próximo treino do atleta — isso fica em
+    **Recomendação de Treino**. Aqui é a evidência: ranking, matriz de
+    confusão e ablação. Os modelos de pace/tempo ficam na última aba
+    (auxiliares).
+    """
+)
+
+st.info(
+    """
+**Déficit** — quanto falta de cada tipo de treino em relação à meta do cluster
+(`meta − atual` nas últimas 6 semanas). Ex.: meta pede 25% de longão e o atleta
+fez 5% → déficit de longão = +20%. A regra recomenda o tipo com **maior déficit**
+(o que está mais em falta).
+
+**Baseline** — recomendador **bobo de propósito**, só para comparar. Exemplos:
+sempre “leve”, repetir o último treino, sortear pela distribuição do atleta.
+Se a regra do projeto **não ganha** desses chutes, ela não agrega valor.
     """
 )
 
@@ -34,30 +50,32 @@ with st.spinner("Avaliando recomendadores (cacheado após a 1ª vez)…"):
     baselines = comparacao_baselines()
 
 veredito = baselines["veredito"]
-pct_leve = veredito["pct_leve_global"] * 100
+pct_leve = veredito["pct_leve_cluster"] * 100
 derrotas = veredito["derrotas"]
-nome_global = baselines.get("nome_regra_global", NOME_REGRA_META_GLOBAL)
+nome_regra = baselines.get("nome_regra_cluster", NOME_REGRA_META_CLUSTER)
 
 st.success(
     f"""
 **Conclusão em 30 segundos**
 
-1. A regra **{nome_global}** recomenda **leve em {pct_leve:.0f}%** dos casos
-   (F1-macro **{veredito["f1_global"] * 100:.1f}%**, acerto
-   **{veredito["acerto_global"] * 100:.1f}%**).
+1. A regra **{nome_regra}** recomenda **leve em {pct_leve:.0f}%** dos casos
+   (F1-macro **{veredito["f1_cluster"] * 100:.1f}%**, acerto
+   **{veredito["acerto_cluster"] * 100:.1f}%**).
 2. O melhor no ranking é **`{veredito["melhor_nome"]}`**
-   (F1 **{veredito["melhor_f1"] * 100:.1f}%**) — a regra por meta global
+   (F1 **{veredito["melhor_f1"] * 100:.1f}%**) — a regra por cluster
    {"**perde** de: " + ", ".join(f"`{d}`" for d in derrotas) if derrotas else "não perde com significância dos listados"}.
-3. Isso mede **imitação** (acertou o que o atleta fez), não se o conselho é bom.
-   Qualidade do conselho → tela **Desfecho e Meta**.
+3. Isso mede **imitação** (acertou o que o atleta fez), não se o conselho é bom
+   para a prova (isso exigiria um desfecho externo, fora desta tela).
     """
 )
 
-with st.expander("📖 Termos rápidos (bootstrap, Wilcoxon, F1…)"):
+with st.expander("📖 Termos rápidos (déficit, baseline, F1…)"):
     st.markdown(
         """
         | Termo | Em uma frase |
         |---|---|
+        | **Déficit** | `meta − atual` por tipo na janela; maior déficit = tipo mais em falta → próximo treino. |
+        | **Baseline** | Recomendador trivial (sempre leve, repete o último…) usado como piso de comparação. |
         | **Origem rolante** | Para cada treino recente, o sistema só vê o histórico anterior e tenta acertar o tipo daquele treino. |
         | **F1-macro** | Média do acerto em **cada** um dos 4 tipos. Quem sempre fala "leve" tem acerto ok e F1 baixo. |
         | **`rec_leve_%`** | % das recomendações que foram "leve". Se ~80%, a regra virou constante. |
@@ -70,7 +88,7 @@ with st.expander("📖 Termos rápidos (bootstrap, Wilcoxon, F1…)"):
 
 aba_rec, aba_ablacao, aba_modelos = st.tabs(
     [
-        "1 · Validação da recomendação",
+        "1 · A regra vs baselines",
         "2 · Ablação da regra",
         "3 · Modelos auxiliares (pace/tempo)",
     ]
@@ -81,31 +99,25 @@ with aba_rec:
     st.header("A regra supera o trivial?")
     st.markdown(
         f"""
-        Protocolo: **origem rolante** — {baselines["casos"]} casos em
+        Método: **origem rolante** — {baselines["casos"]} casos em
         {baselines["atletas"]} atletas. O recomendador vê só o passado e tenta
         acertar o tipo da próxima corrida que o atleta **de fato fez**.
         """
     )
     st.info(
         "**O que medimos:** imitação. **O que não medimos:** se o conselho é "
-        "bom para a prova (isso está em **Desfecho e Meta**)."
+        "bom para a prova (exigiria desfecho externo)."
     )
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Acerto (meta global)", f"{veredito['acerto_global'] * 100:.1f}%")
-    m2.metric("F1-macro (meta global)", f"{veredito['f1_global'] * 100:.1f}%")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Acerto (meta do cluster)", f"{veredito['acerto_cluster'] * 100:.1f}%")
+    m2.metric("F1-macro (meta do cluster)", f"{veredito['f1_cluster'] * 100:.1f}%")
     m3.metric("% recomenda leve", f"{pct_leve:.0f}%")
-    if veredito["f1_cluster"] is not None:
-        m4.metric(
-            "F1 (meta do cluster)",
-            f"{veredito['f1_cluster'] * 100:.1f}%",
-            delta=f"{(veredito['f1_cluster'] - veredito['f1_global']) * 100:.1f} pp",
-        )
 
-    st.subheader("Ranking: regras do projeto vs baselines")
+    st.subheader("Ranking: regra do projeto vs baselines")
     st.caption(
-        "Valores em **%**. Destaque vermelho = regras do TCC "
-        f"(`{NOME_REGRA_META_GLOBAL}` e `{NOME_REGRA_META_CLUSTER}`). "
+        "Valores em **%**. Destaque vermelho = regra do TCC "
+        f"(`{NOME_REGRA_META_CLUSTER}`). "
         "Olhe sobretudo **f1_macro_%** e **rec_leve_%**."
     )
     tabela = baselines["tabela"]
@@ -115,64 +127,47 @@ with aba_rec:
     nomes = tabela["recomendador"].to_list()
     col_f1 = "f1_macro_%" if "f1_macro_%" in tabela.columns else "f1_macro"
     cores = [
-        "#F44336"
-        if n in (NOME_REGRA_META_GLOBAL, NOME_REGRA_META_CLUSTER)
-        else "#90A4AE"
-        for n in nomes
+        "#F44336" if n == NOME_REGRA_META_CLUSTER else "#90A4AE" for n in nomes
     ]
     ax.barh(nomes, tabela[col_f1].to_list(), color=cores)
     ax.set_xlabel("F1-macro (%)")
-    ax.set_title("Regras do projeto (vermelho) vs baselines")
+    ax.set_title("Regra do projeto (vermelho) vs baselines")
     ax.invert_yaxis()
     fig.tight_layout()
     st.pyplot(fig)
     plt.close(fig)
 
-    st.subheader(f"Confrontos diretos com `{nome_global}`")
+    st.subheader(f"Confrontos diretos com `{nome_regra}`")
     confrontos = baselines["confrontos"]
     st.dataframe(confrontos, width="stretch")
     if derrotas:
         st.error(
-            f"A regra **{nome_global}** **perde** com significância estatística para: "
+            f"A regra **{nome_regra}** **perde** com significância estatística para: "
             + ", ".join(f"`{r}`" for r in derrotas)
-            + ". Causa raiz: meta de 60% leve inalcançável — ver **Desfecho e Meta**."
+            + "."
         )
     else:
         st.warning("Nenhuma derrota significativa listada nos confrontos filtrados.")
 
-    st.subheader("Matriz de confusão — déficit vs meta global")
+    st.subheader("Matriz de confusão — déficit vs meta do cluster")
     st.caption("Linhas = o que o atleta fez · Colunas = o que o sistema recomendou.")
-    st.dataframe(baselines["matriz_global"], width="stretch")
+    st.dataframe(baselines["matriz_cluster"], width="stretch")
 
-    if baselines["matriz_cluster"].height:
-        with st.expander("Matriz de confusão — déficit vs meta do cluster"):
-            st.dataframe(baselines["matriz_cluster"], width="stretch")
-            if veredito["pct_leve_cluster"] is not None:
-                st.caption(
-                    f"Meta do cluster recomenda leve em "
-                    f"**{veredito['pct_leve_cluster'] * 100:.0f}%** dos casos "
-                    f"(acerto {veredito['acerto_cluster'] * 100:.1f}%, "
-                    f"F1 {veredito['f1_cluster'] * 100:.1f}%)."
-                )
-
-    st.subheader("Amostra de casos — déficit vs meta global")
+    st.subheader("Amostra de casos — déficit vs meta do cluster")
     st.caption(
         "Cada linha: últimos 5 tipos do histórico → o que aconteceu (`real`) "
         "vs o que a regra pediu (`predito`)."
     )
-    st.dataframe(baselines["amostra_global"], width="stretch")
-
-    if baselines["amostra_cluster"].height:
-        with st.expander("Amostra de casos — déficit vs meta do cluster"):
-            st.dataframe(baselines["amostra_cluster"], width="stretch")
+    st.dataframe(baselines["amostra_cluster"], width="stretch")
 
 
 with aba_ablacao:
     st.header("Quais partes da regra realmente importam?")
     st.markdown(
         """
-        Removemos um componente por vez. Se a métrica **não muda**, o componente
-        é complexidade sem retorno. Se **melhora** ao remover, o componente atrapalha.
+        Removemos um componente por vez (meta de referência = `volume_moderado`).
+        Se a métrica **não muda**, o componente é complexidade sem retorno.
+        Se **melhora** ao remover, o componente atrapalha.
         """
     )
 

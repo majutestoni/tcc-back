@@ -1,22 +1,15 @@
 """
-Recomendadores baseline (ADR-017, item 2).
+Recomendadores baseline (ADR-017, item 2; ADR-024).
 
-Antes disto, a regra de ADR-007 não se comparava a nada: o projeto reportava
-que ela produzia recomendações, não que produzisse recomendações *melhores que
-o trivial*. Sem piso de comparação, qualquer número parece bom.
-
-Os baselines vão do trivial ao competitivo:
+A regra de produto é só o cluster (`déficit vs meta do cluster`). Os baselines
+triviais servem de piso de comparação no protocolo de imitação.
 
 - `aleatorio` — piso absoluto (25% por tipo).
-- `sempre_leve` — a classe que a regra de ADR-007 mais emite; se a regra não
-  superar isto, ela é uma constante disfarçada.
-- `majoritario_global` / `majoritario_atleta` — ignoram contexto, exploram só a
-  frequência das classes.
+- `sempre_leve` — constante; se a regra não superar isto, ela é degenerada.
+- `majoritario_global` / `majoritario_atleta` — ignoram contexto fino.
 - `distribuicao_atleta` — amostra da distribuição histórica do atleta.
-- `repetir_ultimo` — explora autocorrelação temporal, o baseline mais difícil
-  de bater em séries de treino.
-- `deficit` — regra por déficit vs meta global.
-- `cluster` — mesma regra com meta do perfil KMeans.
+- `repetir_ultimo` — autocorrelação temporal.
+- `cluster` — regra de produto (meta do perfil KMeans).
 """
 
 from __future__ import annotations
@@ -30,15 +23,15 @@ from dataset.experimentos.protocolo_recomendacao import (
     Recomendador,
 )
 from dataset.models.previsao_treino.model import (
-    META,
     PESOS_DEFICIT,
     calcular_deficit,
     recomendar_proximo_treino,
 )
-from dataset.models.previsao_treino.recomendacao_cluster import META_POR_PERFIL
+from dataset.models.previsao_treino.recomendacao_cluster import (
+    META_CLUSTER_PADRAO,
+    meta_para_perfil,
+)
 
-# Nomes exibidos na UI / tabelas (sem códigos ADR).
-NOME_REGRA_META_GLOBAL = "déficit vs meta global"
 NOME_REGRA_META_CLUSTER = "déficit vs meta do cluster"
 
 
@@ -81,7 +74,7 @@ def recomendador_majoritario_atleta() -> Recomendador:
 
 
 def recomendador_distribuicao_atleta(seed: int = SEED) -> Recomendador:
-    """Amostra da distribuição histórica do atleta na janela de ADR-007."""
+    """Amostra da distribuição histórica do atleta na janela temporal."""
     rng = np.random.default_rng(seed)
 
     def recomendar(contexto: ContextoAtleta) -> str:
@@ -109,10 +102,10 @@ def recomendador_deficit(
     usar_antifadiga: bool = True,
 ) -> Recomendador:
     """
-    A regra de ADR-007. Os parâmetros permitem a ablação de `ablacao.py`;
-    os padrões reproduzem o comportamento em produção.
+    Regra por déficit vs meta. Sem `meta`, usa `META_CLUSTER_PADRAO`
+    (volume_moderado). Usado pela ablação e pelo recomendador de cluster.
     """
-    meta_uso = meta if meta is not None else META
+    meta_uso = meta if meta is not None else META_CLUSTER_PADRAO
     pesos_uso = pesos if pesos is not None else PESOS_DEFICIT
 
     def recomendar(contexto: ContextoAtleta) -> str:
@@ -132,22 +125,17 @@ def recomendador_deficit(
 def recomendador_cluster(
     perfil_por_atleta: dict[int, str],
 ) -> Recomendador:
-    """
-    Regra de ADR-007 com a meta do perfil_cluster do atleta (ADR-021).
-
-    Atletas sem cluster caem na `META` global.
-    """
+    """Regra de produto: meta do perfil_cluster (ADR-024)."""
 
     def recomendar(contexto: ContextoAtleta) -> str:
         chave = perfil_por_atleta.get(contexto.athlete_id)
-        meta = META_POR_PERFIL.get(chave, META) if chave else META
-        return recomendador_deficit(meta=meta)(contexto)
+        return recomendador_deficit(meta=meta_para_perfil(chave))(contexto)
 
     return recomendar
 
 
 def baselines_padrao(tipo_majoritario: str = "leve") -> dict[str, Recomendador]:
-    """Conjunto de baselines + regra por déficit vs meta global."""
+    """Baselines triviais (sem a regra de produto)."""
     return {
         "aleatorio": recomendador_aleatorio(),
         "sempre_leve": recomendador_constante("leve"),
@@ -157,7 +145,6 @@ def baselines_padrao(tipo_majoritario: str = "leve") -> dict[str, Recomendador]:
         "majoritario_atleta": recomendador_majoritario_atleta(),
         "distribuicao_atleta": recomendador_distribuicao_atleta(),
         "repetir_ultimo": recomendador_repetir_ultimo(),
-        NOME_REGRA_META_GLOBAL: recomendador_deficit(),
     }
 
 
@@ -165,7 +152,7 @@ def baselines_com_cluster(
     perfil_por_atleta: dict[int, str],
     tipo_majoritario: str = "leve",
 ) -> dict[str, Recomendador]:
-    """Baselines padrão + regra por déficit vs meta do cluster."""
+    """Baselines triviais + regra de produto (meta do cluster)."""
     recs = baselines_padrao(tipo_majoritario=tipo_majoritario)
     recs[NOME_REGRA_META_CLUSTER] = recomendador_cluster(perfil_por_atleta)
     return recs

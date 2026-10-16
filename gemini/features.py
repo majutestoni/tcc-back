@@ -16,22 +16,21 @@ from dataset.constants import (
     COL_TIPO_TREINO,
 )
 from dataset.models.previsao_treino.model import (
-    META,
     SEMANAS_JANELA,
     calcular_deficit,
     distribuicao_por_atleta,
     filtrar_janela_temporal,
     ultimos_treinos_por_atleta,
 )
+from dataset.models.previsao_treino.recomendacao_cluster import meta_do_atleta
 from gemini.schemas import FeaturesAtleta
 
 
 def montar_features_atleta(df: pl.DataFrame, athlete_id: int) -> FeaturesAtleta:
     """Constrói o resumo determinístico de um atleta para enviar ao Gemini.
 
-    Reaproveita as features já usadas na recomendação por regras
-    (janela temporal, distribuição, déficits, últimos treinos) e o perfil
-    interpretável por regras.
+    Reaproveita janela temporal, distribuição e déficits vs meta do cluster
+    (ADR-024) e o perfil interpretável por regras.
     """
     perfil = montar_perfil_atletas(df).filter(pl.col(COL_ATHLETE) == athlete_id)
     if perfil.height == 0:
@@ -46,6 +45,8 @@ def montar_features_atleta(df: pl.DataFrame, athlete_id: int) -> FeaturesAtleta:
         linha_regras[COL_PERFIL_ATLETA][0] if linha_regras.height > 0 else None
     )
 
+    meta = meta_do_atleta(df, athlete_id)
+
     df_janela = filtrar_janela_temporal(df)
     distribuicao = distribuicao_por_atleta(df_janela).filter(
         pl.col(COL_ATHLETE) == athlete_id
@@ -55,7 +56,7 @@ def montar_features_atleta(df: pl.DataFrame, athlete_id: int) -> FeaturesAtleta:
         for item in distribuicao.iter_rows(named=True)
     }
     deficits = {
-        tipo: round(valor, 4) for tipo, valor in calcular_deficit(META, atual).items()
+        tipo: round(valor, 4) for tipo, valor in calcular_deficit(meta, atual).items()
     }
     ultimos = ultimos_treinos_por_atleta(df_janela).get(athlete_id, [])
 
@@ -75,7 +76,7 @@ def montar_features_atleta(df: pl.DataFrame, athlete_id: int) -> FeaturesAtleta:
             round(float(pace_janela), 2) if pace_janela is not None else None
         ),
         distribuicao_atual=atual,
-        meta_distribuicao=META,
+        meta_distribuicao=meta,
         deficits=deficits,
         ultimos_treinos=ultimos,
         janela_semanas=SEMANAS_JANELA,

@@ -76,7 +76,7 @@ tests/                      # Testes de unidade (pytest)
 scripts/                    # baixar_long_distance.sh (fonte externa, ADR-018)
 ```
 
-Execução principal: `python -m dataset.models.model_main` (atualmente chama `treina_modelo` — recomendação de treino por regras).
+Execução principal: `python -m dataset.models.model_main` (recomendação por cluster, ADR-024).
 
 Experimentos: `python -m dataset.experimentos protocolo|baselines|desfecho|meta|tudo`.
 
@@ -144,7 +144,7 @@ Validação via `metricas_internas` (silhouette, davies-bouldin, calinski-haraba
 ---
 
 ### ADR-007 — Recomendação de treino por regras baseada em déficit de distribuição
-**Status:** Aceita com **defeito estrutural documentado** — ver ADR-017 (avaliação) e ADR-019 (causa e correção proposta)
+**Status:** Substituída por ADR-024 (produto). Defeito estrutural documentado em ADR-017/ADR-019; a `META` global permanece só como artefato histórico / experimentos de desfecho.
 **Contexto:** Recomendar o próximo treino de forma explicável, corrigindo desequilíbrios no plano de treino do atleta.
 **Decisão:** [previsao_treino/model.py](dataset/models/previsao_treino/model.py) — `treina_modelo`:
 1. Calcula a distribuição de tipos de treino do atleta numa **janela de `SEMANAS_JANELA = 6` semanas**.
@@ -380,7 +380,7 @@ Novo pacote [dataset/fontes/](dataset/fontes/) com `FonteDados` (schema canônic
 - Página [6_Recomendacao_Treino.py](app/pages/6_Recomendacao_Treino.py) também exibe a recomendação por cluster ao lado de regras e Gemini (mesmo atleta).
 - Renumeração para abrir o slot 7: Histórico `7→8`, Protocolo `8→9`, Desfecho `9→10`.
 
-A lógica de negócio **não muda**: `gerar_recomendacoes_por_cluster` continua usando `META_POR_PERFIL` (`volume_alto` / `volume_moderado`) e calibração de distância/pace no histórico do cluster. Baseline global (ADR-007) permanece o default; cluster e Gemini são alternativas complementares.
+`gerar_recomendacoes_por_cluster` usa `META_POR_PERFIL` e calibração no histórico do cluster. *(ADR-024: a meta global deixou de ser regra de produto; cluster é o único caminho de recomendação.)*
 
 **Consequências:** App passa a ter **10 telas**. Ordem: 1) Home, 2) Visualização, 3) Comparação de Modelos, 4) Categorização, 5) Atletas, 6) Recomendação de Treino, 7) Recomendação por Cluster, 8) Histórico, 9) Protocolo Experimental, 10) Desfecho e Meta.
 
@@ -398,6 +398,47 @@ A lógica de negócio **não muda**: `gerar_recomendacoes_por_cluster` continua 
 - Helpers `matriz_confusao` e `tabela_amostra_casos` em [protocolo_recomendacao.py](dataset/experimentos/protocolo_recomendacao.py).
 
 **Consequências:** A primeira carga da aba de recomendação passa a depender também do KMeans (mapa atleta→perfil_cluster), reaproveitando o cache de `clusters_por_genero` (ADR-016). A CLI `python -m dataset.experimentos baselines` continua usando `baselines_padrao` (sem cluster), a menos que seja estendida depois; a UI é a superfície completa.
+
+---
+
+### ADR-023 — Demo Streamlit: recomendação só por cluster; remover telas dedicadas
+**Status:** Substituída por ADR-024 (quanto à coexistência da meta global no Protocolo)
+**Contexto:** A usuária pediu para simplificar a vitrine: uma única tela de recomendação (por cluster), sem a página dedicada de cluster e sem a tela de Desfecho/Meta (os experimentos de desfecho seguem disponíveis via CLI).
+
+**Decisão:**
+- Removidas as páginas `7_Recomendacao_por_Cluster.py` e `10_Desfecho_e_Meta.py`.
+- [6_Recomendacao_Treino.py](app/pages/6_Recomendacao_Treino.py) passa a ser **só por cluster** (remove a seção de déficit vs meta global). Ao informar o ID, mostra também **posição relativa** (`tabela_percentis_atleta` + `plotar_painel_posicao_atleta`) e a **ficha/card do cluster** (`plotar_ficha_atleta`).
+- Em **Próximo treino recomendado**, a demo exibe justificativa descritiva (`explicar_recomendacao`) — tipo (déficit vs meta do cluster + anti-fadiga), distância (faixa calibrada no cluster × histórico do atleta na janela), pace alvo (média da janela + offset) e tempo (distância × pace).
+- Gemini permanece; ao salvar histórico, grava `origem="cluster"` (não mais regras globais).
+- Renumeração: Histórico `8→7`, Protocolo `9→8`. App fica com **8 telas** (Home + 7 páginas).
+
+**Consequências:** Loaders de desfecho (`desfecho_meia`, `meta_aprendida`, …) permanecem em `app/shared.py` e nos experimentos CLI; só saem do menu Streamlit. *(ADR-024 remove a meta global também do Protocolo e dos baselines de produto.)*
+
+### ADR-024 — Recomendação de treino exclusivamente por cluster
+**Status:** Aceita
+**Contexto:** A demo ainda citava “meta global fixa” e o Protocolo/baselines tratavam `déficit vs meta global` (ADR-007 / `META` 60/20/12/8) como regra do projeto. A usuária pediu para remover totalmente a regra global: **toda** recomendação de treino usa só o cluster.
+
+**Decisão:**
+- Regra de produto = `gerar_recomendacoes_por_cluster` / `recomendador_cluster` com `META_POR_PERFIL` (`volume_alto` / `volume_moderado`).
+- Fallback sem `perfil_cluster` = `META_CLUSTER_PADRAO` (`volume_moderado`) — **nunca** a `META` global.
+- Removido `déficit vs meta global` de `baselines_padrao` / ranking do Protocolo; confrontos e veredito centram em `déficit vs meta do cluster`.
+- Gemini (`montar_features_atleta`) e `model_main` usam meta/params do cluster.
+- Ablação usa meta de referência `volume_moderado` (não a `META` 60/20/12/8).
+- A constante `META` em `model.py` permanece só para experimentos históricos de desfecho/meta aprendida (ADR-018/019) e para `treina_modelo` na tela Comparação de Modelos (paridade com notebooks) — **não** é caminho de recomendação de produto.
+
+**Consequências:** Protocolo e CLI `baselines` validam a regra por cluster. Textos da UI não contrastam mais com “meta global”.
+
+### ADR-025 — Renomear tela “Protocolo Experimental” → “Validação da recomendação”
+**Status:** Aceita
+**Contexto:** O nome “Protocolo Experimental” era jargão de ADR-017 e não explicava a tela para quem abre o app.
+
+**Decisão:**
+- Arquivo `8_Protocolo_Experimental.py` → `8_Validacao_da_Recomendacao.py`.
+- Título: **Validação da recomendação**; subtítulo **A regra funciona?**; lead **Experimentos — recomendação vs baselines**.
+- Aba 1 renomeada para **A regra vs baselines** (conteúdo igual).
+- Home, Comparação de Modelos, FAQ e `GUIA-EXPERIMENTOS.md` atualizados.
+
+**Consequências:** O menu lateral Streamlit passa a mostrar “Validacao da Recomendacao”. A lógica/loaders não mudam.
 
 ---
 
@@ -422,18 +463,18 @@ A lógica de negócio **não muda**: `gerar_recomendacoes_por_cluster` continua 
 | Onde ficam os nomes de coluna e thresholds? | Sempre em [constants.py](dataset/constants.py). |
 | Como rodar o projeto? | `python -m dataset.models.model_main` (ver [readme.md](readme.md)). Notebooks em `notebooks/`. |
 | Quantas corridas mínimas para gerar perfil? | `MIN_CORRIDAS_PERFIL = 20`. |
-| Qual a meta de distribuição de treinos? | `META` em [model.py](dataset/models/previsao_treino/model.py): leve 60%, longão 20%, ritmo 12%, intervalado 8%. |
-| Regras ou ML para recomendação? | Baseline = **regras** (`treina_modelo`, ADR-007). Por cluster = `gerar_recomendacoes_por_cluster` (ADR-021). Alternativa via LLM = **Gemini** (ADR-010). RF existe mas está desativado. |
+| Qual a meta de distribuição de treinos? | Por perfil_cluster em `META_POR_PERFIL` (ADR-024): `volume_alto` / `volume_moderado`. A antiga `META` global (60/20/12/8) não é mais usada na recomendação. |
+| Regras ou ML para recomendação? | Produto = **cluster** (`gerar_recomendacoes_por_cluster`, ADR-024). Alternativa via LLM = **Gemini** (ADR-010, features com meta do cluster). RF existe mas está desativado. |
 | Este projeto tem API HTTP? | Ainda não (ver ADR-009). |
 | Como recomendar treino via Gemini? | `python -m gemini.recomendacao <athlete_id>` (requer `GEMINI_API_KEY`). Ver ADR-010 e [gemini/](gemini/). |
 | Onde configurar a chave do Gemini? | `.env` (copiar de `.env.example`); lido por `GeminiConfig.from_env()`. |
 | Como clonar e rodar em outra máquina? | `bash run.sh` (macOS/Linux) ou `.\run.ps1` (Windows). Cria venv, instala `requirements.txt`, gera `.env` e sobe o Streamlit. |
 | Como avaliar um modelo corretamente? | `dataset.avaliacao.avaliar` com `EspecModelo` — **nunca** `train_test_split` por corrida (ADR-017). Particionamento é por **atleta**. |
-| Como rodar os experimentos? | CLI: `python -m dataset.experimentos protocolo\|baselines\|desfecho\|meta\|tudo` (os dois últimos exigem a fonte externa). No app: telas **Protocolo Experimental** e **Desfecho e Meta** (ADR-020). |
-| Onde está a validação da recomendação? | Tela **Protocolo Experimental**, aba 1 (ADR-022): ranking vs baselines (inclui cluster), matriz de confusão, amostra de casos. Qualidade do conselho → **Desfecho e Meta**. |
+| Como rodar os experimentos? | CLI: `python -m dataset.experimentos protocolo\|baselines\|desfecho\|meta\|tudo` (os dois últimos exigem a fonte externa). No app: tela **Validação da recomendação** (itens 1–2); desfecho/meta só via CLI (ADR-023). |
+| Onde está a validação da recomendação? | Tela **Validação da recomendação** (`8_Validacao_da_Recomendacao.py`, ADR-022/025): ranking vs baselines, matriz, amostra. Desfecho de prova → CLI `desfecho`/`meta`. |
 | Por que a tela de Comparação de Modelos mostra números diferentes da tela de Protocolo? | De propósito (ADR-020). A primeira é porte do notebook e usa o split antigo; a segunda usa o protocolo corrigido de ADR-017. As duas coexistem com a diferença rotulada. |
-| Quantas telas o app tem? | 10 (ADR-021): Home, Visualização, Comparação de Modelos, Categorização, Atletas, Recomendação, Recomendação por Cluster, Histórico, Protocolo Experimental, Desfecho e Meta. |
-| A recomendação usa os clusters? | A **global** (ADR-007) não. A por **cluster** (ADR-021 / `recomendacao_cluster.py`) sim: meta e parâmetros por `perfil_cluster`. No app: tela 7 e seção na tela 6. |
+| Quantas telas o app tem? | 8 (ADR-023/025): Home, Visualização, Comparação de Modelos, Categorização, Atletas, Recomendação de Treino, Histórico, Validação da recomendação. |
+| A recomendação usa os clusters? | Sim — **só** cluster (ADR-024): demo, Gemini, Protocolo e `model_main`. |
 | Onde fica a fonte externa de validação? | `$DIRETORIO_DADOS_EXTERNOS` (padrão `~/.cache/tcc-back-2/dados`); baixe com `bash scripts/baixar_long_distance.sh` (ADR-018). Não versionada, 2,3 GB. |
 | A regra de ADR-007 funciona? | Não como está: emite `leve` em 76% dos casos e perde de `sempre_leve` no protocolo de ADR-017. A causa é a `META` inalcançável (ADR-019). |
 | Posso trocar os valores de `META`? | Não sem identificação estatística. ADR-019 mostrou que a meta ótima não é identificável (IC de `longao` de 0,13 a 0,42). O problema é o **nível** de `leve`, não os quatro números. |
@@ -477,3 +518,8 @@ A lógica de negócio **não muda**: `gerar_recomendacoes_por_cluster` continua 
 | 2026-10-08 | IA (Claude) | ADR-021: tela 7 simplificada para o fluxo ID → recomendação (igual à tela 6); o dashboard/comparação do notebook deixou de ser a UI principal. |
 | 2026-10-09 | IA (Claude) | **ADR-022**: Protocolo Experimental redesenhado — validação da recomendação como aba principal (conclusão, matriz, amostra de casos, cluster no ranking); modelos pace/tempo na última aba. |
 | 2026-10-09 | IA (Claude) | UI: nomes descritivos nas telas (`déficit vs meta global` / `déficit vs meta do cluster`) em vez de códigos ADR; métricas de recomendação exibidas em %. |
+| 2026-10-12 | IA (Claude) | **ADR-023**: removidas telas Recomendação por Cluster e Desfecho/Meta; Recomendação de Treino fica só por cluster + posição relativa + ficha; Histórico/Protocolo renumerados para 7/8. |
+| 2026-10-12 | IA (Composer) | ADR-023: justificativa descritiva do próximo treino (`explicar_recomendacao` em `recomendacao_cluster.py`) na tela 6 — tipo/distância/pace/tempo em linguagem natural. |
+| 2026-10-12 | IA (Composer) | **ADR-024**: recomendação exclusivamente por cluster — remove meta global dos baselines/Protocolo/Gemini/`model_main`; fallback `volume_moderado`. |
+| 2026-10-12 | IA (Composer) | **ADR-025**: tela `8_Protocolo_Experimental` renomeada para `8_Validacao_da_Recomendacao` — título/subtítulo/lead descritivos. |
+| 2026-10-12 | IA (Composer) | ADR-025: glossário visível de **Déficit** e **Baseline** no topo da tela de Validação. |

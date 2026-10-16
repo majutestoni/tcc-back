@@ -16,10 +16,11 @@ from dataset.constants import (
     COL_N_CORRIDAS,
     COL_PACE,
     COL_PERFIL_ATLETA,
+    COL_TIMESTAMP,
     COL_TIPO_TREINO,
+    SEMANAS_JANELA,
 )
 from dataset.models.previsao_treino.model import (
-    META,
     calcular_deficit,
     distribuicao_por_atleta,
     filtrar_janela_temporal,
@@ -76,21 +77,13 @@ def resumo_atleta(
 
 
 def distribuicao_vs_meta(
-    df: pl.DataFrame, athlete_id: int
+    df: pl.DataFrame, athlete_id: int, caminho: str = CSV_PADRAO
 ) -> tuple[dict, dict, dict, list[str]]:
-    df_janela = filtrar_janela_temporal(df)
-    distribuicao = distribuicao_por_atleta(df_janela).filter(
-        pl.col(COL_ATHLETE) == athlete_id
+    """Compat: delega para a meta do cluster (ADR-024)."""
+    atual, meta, deficits, ultimos, _ = distribuicao_vs_meta_cluster(
+        df, athlete_id, caminho=caminho
     )
-    atual = {
-        item[COL_TIPO_TREINO]: round(item["percentual"], 4)
-        for item in distribuicao.iter_rows(named=True)
-    }
-    deficits = {
-        tipo: round(valor, 4) for tipo, valor in calcular_deficit(META, atual).items()
-    }
-    ultimos = ultimos_treinos_por_atleta(df_janela).get(athlete_id, [])
-    return atual, META, deficits, ultimos
+    return atual, meta, deficits, ultimos
 
 
 def grafico_distribuicao(atual: dict, meta: dict):
@@ -116,6 +109,107 @@ def grafico_distribuicao(atual: dict, meta: dict):
     ax.set_ylabel("Percentual (%)")
     ax.set_title("Distribuição atual vs meta (janela recente)")
     ax.legend()
+    fig.tight_layout()
+    return fig
+
+
+def corridas_janela_atleta(
+    df: pl.DataFrame,
+    athlete_id: int,
+    semanas: int = SEMANAS_JANELA,
+) -> pl.DataFrame:
+    """
+    Corridas do atleta na janela deslizante das últimas `semanas` semanas.
+
+    A âncora é a **última corrida deste atleta** (não a data máxima da base).
+    A janela é por tempo, não por número fixo de corridas — o algoritmo usa a
+    distribuição de tipos nesse intervalo para calcular o déficit vs meta.
+    """
+    sub = (
+        df.filter(pl.col(COL_ATHLETE) == athlete_id)
+        .with_columns(
+            pl.col(COL_TIMESTAMP)
+            .str.strptime(pl.Datetime, format="%d/%m/%Y %H:%M", strict=False)
+            .alias("_ts")
+        )
+        .drop_nulls("_ts")
+        .sort("_ts")
+    )
+    if sub.height == 0:
+        return pl.DataFrame()
+
+    data_max = sub["_ts"].max()
+    limite = data_max - pl.duration(weeks=semanas)
+    sub = sub.filter(pl.col("_ts") >= limite)
+
+    return sub.select(
+        pl.col(COL_TIMESTAMP).alias("data"),
+        pl.col(COL_TIPO_TREINO).alias("tipo"),
+        (pl.col(COL_DISTANCE) / 1000).round(2).alias("distancia_km"),
+        pl.col(COL_PACE).round(2).alias("pace_min_km"),
+        pl.Series(
+            "pace",
+            [formatar_pace(v) for v in sub[COL_PACE].to_list()],
+        ),
+    )
+
+
+def grafico_janela_deslizante(corridas: pl.DataFrame, semanas: int = SEMANAS_JANELA):
+    """Faixa temporal colorida pelos tipos de treino na janela."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+
+    if corridas.height == 0:
+        fig, ax = plt.subplots(figsize=(8, 1.8))
+        ax.axis("off")
+        ax.text(0.5, 0.5, "Nenhuma corrida na janela", ha="center", va="center")
+        return fig
+
+    datas = (
+        corridas["data"]
+        .str.strptime(pl.Datetime, format="%d/%m/%Y %H:%M", strict=False)
+        .to_list()
+    )
+    tipos = corridas["tipo"].to_list()
+    distancias = corridas["distancia_km"].to_list()
+
+    fig, ax = plt.subplots(figsize=(10, 2.4))
+    for i, (data, tipo, dist) in enumerate(zip(datas, tipos, distancias)):
+        cor = CORES_TIPO.get(tipo, "#9E9E9E")
+        ax.scatter(
+            data,
+            0.5,
+            s=120 + min(dist, 20) * 8,
+            c=cor,
+            zorder=3,
+            edgecolors="white",
+            linewidths=0.8,
+        )
+        if i == 0 or i == len(datas) - 1 or i % max(1, len(datas) // 8) == 0:
+            ax.annotate(
+                tipo,
+                (data, 0.5),
+                textcoords="offset points",
+                xytext=(0, 12),
+                ha="center",
+                fontsize=7,
+                color="#333",
+            )
+
+    ax.set_ylim(0, 1)
+    ax.set_yticks([])
+    ax.set_title(
+        f"Janela deslizante — últimas {semanas} semanas "
+        f"({len(tipos)} corridas nesta janela)"
+    )
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d/%m"))
+    ax.grid(axis="x", alpha=0.2)
+    for spine in ("top", "left", "right"):
+        ax.spines[spine].set_visible(False)
     fig.tight_layout()
     return fig
 
@@ -162,24 +256,20 @@ def exportar_planilha_atletas(
 
 
 def recomendacao_regras(df: pl.DataFrame, athlete_id: int) -> dict:
-    from dataset.models.previsao_treino.model import treina_modelo
-
-    resultado = treina_modelo(df, athlete_id=athlete_id, plotar=False, verbose=False)
-    if resultado.recomendacoes is None or resultado.recomendacoes.height == 0:
-        return {}
-    return resultado.recomendacoes.row(0, named=True)
+    """Compat: recomendação de produto é só por cluster (ADR-024)."""
+    del df  # assinatura histórica
+    return recomendacao_cluster_atleta(athlete_id)
 
 
 def meta_do_cluster(athlete_id: int, caminho: str = CSV_PADRAO) -> dict:
-    """Meta de distribuição do perfil_cluster do atleta (ou META global)."""
-    from dataset.models.previsao_treino.recomendacao_cluster import META_POR_PERFIL
+    """Meta de distribuição do perfil_cluster do atleta."""
+    from dataset.models.previsao_treino.recomendacao_cluster import (
+        chave_perfil_cluster,
+        meta_para_perfil,
+    )
 
     perfil, _ = clusters_por_genero(caminho)
-    info = perfil.filter(pl.col(COL_ATHLETE) == athlete_id)
-    if info.height == 0 or "perfil_cluster" not in info.columns:
-        return META
-    chave = info["perfil_cluster"][0]
-    return META_POR_PERFIL.get(chave, META)
+    return meta_para_perfil(chave_perfil_cluster(perfil, athlete_id))
 
 
 def distribuicao_vs_meta_cluster(
@@ -238,6 +328,21 @@ def perfil_multidim(caminho: str = CSV_PADRAO) -> pl.DataFrame:
 
 
 @st.cache_data(persist="disk")
+def perfil_multidim_com_cluster(caminho: str = CSV_PADRAO) -> pl.DataFrame:
+    """Perfil multidimensional + categoria/rótulo do KMeans por atleta."""
+    perfil_c, _ = clusters_por_genero(caminho)
+    cols = [COL_ATHLETE, "categoria", "rotulo_cluster", "perfil_cluster"]
+    faltando = [c for c in cols if c not in perfil_c.columns]
+    if faltando:
+        raise ValueError(f"perfil de cluster incompleto; faltam: {faltando}")
+    return perfil_multidim(caminho).join(
+        perfil_c.select(cols).unique(subset=[COL_ATHLETE]),
+        on=COL_ATHLETE,
+        how="left",
+    )
+
+
+@st.cache_data(persist="disk")
 def clusters_por_genero(caminho: str = CSV_PADRAO) -> tuple[pl.DataFrame, dict]:
     from dataset.categorizar.kmeans import treina_kmeans_por_genero
     from dataset.categorizar.nomear_clusters import nomear_categorias
@@ -281,33 +386,30 @@ def recomendacoes_por_cluster(caminho: str = CSV_PADRAO) -> pl.DataFrame:
 
 
 @st.cache_data(persist="disk")
-def comparacao_global_vs_cluster(caminho: str = CSV_PADRAO) -> dict:
-    """Baseline por meta global × recomendação por meta do cluster."""
-    from dataset.models.previsao_treino.model import treina_modelo
-    from dataset.models.previsao_treino.recomendacao_cluster import (
-        META_POR_PERFIL,
-        comparar_recomendacoes,
-        resumo_comparacao,
-    )
-
-    df = carregar_df(caminho)
-    resultado_global = treina_modelo(df, plotar=False, verbose=False)
-    rec_global = resultado_global.recomendacoes
-    if rec_global is None or rec_global.height == 0:
-        return {
-            "comparacao": pl.DataFrame(),
-            "resumo": {"n_atletas": 0},
-            "metas_perfil": META_POR_PERFIL,
-            "params_por_perfil": {},
-        }
-
+def parametros_por_perfil_cluster(caminho: str = CSV_PADRAO) -> dict:
+    """Distância/pace offset calibrados por perfil_cluster (volume_alto / moderado)."""
     from dataset.models.previsao_treino.recomendacao_cluster import (
         calibrar_parametros_por_perfil,
     )
 
     perfil, _ = clusters_por_genero(caminho)
-    rec_cluster = recomendacoes_por_cluster(caminho)
-    comparacao = comparar_recomendacoes(rec_global, rec_cluster)
+    return calibrar_parametros_por_perfil(carregar_df(caminho), perfil)
+
+
+@st.cache_data(persist="disk")
+def comparacao_global_vs_cluster(caminho: str = CSV_PADRAO) -> dict:
+    """
+    Compat: só devolve metas/params por cluster (ADR-024 removeu a meta global
+    do produto). Mantido o nome do loader para não quebrar caches antigos.
+    """
+    from dataset.models.previsao_treino.recomendacao_cluster import (
+        META_POR_PERFIL,
+        calibrar_parametros_por_perfil,
+        resumo_comparacao,
+    )
+
+    df = carregar_df(caminho)
+    perfil, _ = clusters_por_genero(caminho)
     params = calibrar_parametros_por_perfil(df, perfil)
     params_legivel = {
         chave: {
@@ -320,8 +422,8 @@ def comparacao_global_vs_cluster(caminho: str = CSV_PADRAO) -> dict:
         for chave, tipos in params.items()
     }
     return {
-        "comparacao": comparacao,
-        "resumo": resumo_comparacao(comparacao),
+        "comparacao": pl.DataFrame(),
+        "resumo": resumo_comparacao(pl.DataFrame()),
         "metas_perfil": META_POR_PERFIL,
         "params_por_perfil": params_legivel,
     }
@@ -454,14 +556,13 @@ def avaliacao_protocolo(caminho: str = CSV_PADRAO) -> dict:
 @st.cache_data(persist="disk")
 def comparacao_baselines(caminho: str = CSV_PADRAO, n_teste: int = 5) -> dict:
     """
-    Baselines vs regras (meta global e meta do cluster), origem rolante.
+    Baselines triviais vs regra de produto (meta do cluster), origem rolante.
 
     Devolve também matriz de confusão e amostra de casos para a UI de validação.
     """
     from dataset.avaliacao.estatistica import comparar_todos
     from dataset.experimentos.baselines import (
         NOME_REGRA_META_CLUSTER,
-        NOME_REGRA_META_GLOBAL,
         baselines_com_cluster,
     )
     from dataset.experimentos.protocolo_recomendacao import (
@@ -485,8 +586,7 @@ def comparacao_baselines(caminho: str = CSV_PADRAO, n_teste: int = 5) -> dict:
     ]
     por_nome = {r.nome: r for r in resultados}
 
-    alvo = NOME_REGRA_META_GLOBAL
-    cluster_nome = NOME_REGRA_META_CLUSTER
+    alvo = NOME_REGRA_META_CLUSTER
     confrontos = [
         {
             "adversario": c.modelo_b if c.modelo_a == alvo else c.modelo_a,
@@ -498,7 +598,7 @@ def comparacao_baselines(caminho: str = CSV_PADRAO, n_teste: int = 5) -> dict:
         if alvo in (c.modelo_a, c.modelo_b)
     ]
 
-    global_ = por_nome[alvo]
+    clu = por_nome[alvo]
     melhor = max(resultados, key=lambda r: r.f1_macro)
     derrotas = [
         c["adversario"]
@@ -506,32 +606,19 @@ def comparacao_baselines(caminho: str = CSV_PADRAO, n_teste: int = 5) -> dict:
         if c["significativa"]
         and c["vencedor"] not in (alvo, "empate")
     ]
-    clu = por_nome.get(cluster_nome)
 
     return {
         "tabela": tabela_recomendadores(resultados, em_percentual=True),
         "confrontos": pl.DataFrame(confrontos),
         "casos": len(casos),
-        "atletas": global_.n_atletas,
-        "nome_regra_global": alvo,
-        "nome_regra_cluster": cluster_nome,
-        "matriz_global": matriz_confusao(global_.y_true, global_.y_pred),
-        "amostra_global": tabela_amostra_casos(casos, global_.y_pred),
-        "matriz_cluster": (
-            matriz_confusao(clu.y_true, clu.y_pred) if clu is not None else pl.DataFrame()
-        ),
-        "amostra_cluster": (
-            tabela_amostra_casos(casos, clu.y_pred) if clu is not None else pl.DataFrame()
-        ),
+        "atletas": clu.n_atletas,
+        "nome_regra_cluster": alvo,
+        "matriz_cluster": matriz_confusao(clu.y_true, clu.y_pred),
+        "amostra_cluster": tabela_amostra_casos(casos, clu.y_pred),
         "veredito": {
-            "acerto_global": round(global_.acerto, 3),
-            "f1_global": round(global_.f1_macro, 3),
-            "pct_leve_global": round(global_.distribuicao_recomendada["leve"], 3),
-            "acerto_cluster": round(clu.acerto, 3) if clu else None,
-            "f1_cluster": round(clu.f1_macro, 3) if clu else None,
-            "pct_leve_cluster": (
-                round(clu.distribuicao_recomendada["leve"], 3) if clu else None
-            ),
+            "acerto_cluster": round(clu.acerto, 3),
+            "f1_cluster": round(clu.f1_macro, 3),
+            "pct_leve_cluster": round(clu.distribuicao_recomendada["leve"], 3),
             "melhor_nome": melhor.nome,
             "melhor_f1": round(melhor.f1_macro, 3),
             "melhor_acerto": round(melhor.acerto, 3),
@@ -542,7 +629,7 @@ def comparacao_baselines(caminho: str = CSV_PADRAO, n_teste: int = 5) -> dict:
 
 @st.cache_data(persist="disk")
 def ablacao_adr007(caminho: str = CSV_PADRAO, n_teste: int = 5) -> pl.DataFrame:
-    """Ablação dos componentes da regra por déficit vs meta global."""
+    """Ablação dos componentes da regra por déficit (meta volume_moderado)."""
     from dataset.experimentos.ablacao import rodar_ablacao
 
     return rodar_ablacao(carregar_df(caminho), n_teste=n_teste)

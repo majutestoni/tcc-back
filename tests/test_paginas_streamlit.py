@@ -1,7 +1,7 @@
 """
 Teste de fumaça das páginas do Streamlit.
 
-Não executa as páginas (os loaders de ADR-017/018 levam ~1 min na primeira
+Não executa as páginas (os loaders de avaliação levam ~1 min na primeira
 vez, o que é caro demais para um teste de unidade). Verifica o que quebra
 silenciosamente: página com erro de sintaxe, loader renomeado e a checagem de
 base externa ausente.
@@ -17,13 +17,10 @@ LOADERS_ESPERADOS = {
     "avaliacao_protocolo",
     "comparacao_baselines",
     "ablacao_adr007",
-    "fonte_externa_disponivel",
-    "desfecho_meia",
-    "validacao_encaixada",
-    "meta_aprendida",
     "recomendacoes_por_cluster",
-    "comparacao_global_vs_cluster",
     "recomendacao_cluster_atleta",
+    "fichas_atletas",
+    "perfil_multidim",
 }
 
 
@@ -36,30 +33,29 @@ def test_todas_as_paginas_compilam():
         ast.parse(pagina.read_text(encoding="utf-8"), filename=str(pagina))
 
 
-def test_paginas_novas_existem():
+def test_paginas_esperadas_existem():
     nomes = {p.name for p in (APP / "pages").glob("*.py")}
 
-    assert "7_Recomendacao_por_Cluster.py" in nomes
-    assert "8_Historico_Recomendacoes.py" in nomes
-    assert "9_Protocolo_Experimental.py" in nomes
-    assert "10_Desfecho_e_Meta.py" in nomes
+    assert "6_Recomendacao_Treino.py" in nomes
+    assert "7_Historico_Recomendacoes.py" in nomes
+    assert "8_Validacao_da_Recomendacao.py" in nomes
+    assert "8_Protocolo_Experimental.py" not in nomes
+    assert "7_Recomendacao_por_Cluster.py" not in nomes
+    assert "10_Desfecho_e_Meta.py" not in nomes
+    assert "9_Desfecho_e_Meta.py" not in nomes
 
 
-def test_shared_expoe_os_loaders_das_paginas_novas():
+def test_shared_expoe_os_loaders_usados():
     from app import shared
 
     for nome in LOADERS_ESPERADOS:
         assert callable(getattr(shared, nome)), nome
 
 
-def test_paginas_novas_so_importam_loaders_existentes():
+def test_paginas_so_importam_loaders_existentes():
     from app import shared
 
-    for nome in (
-        "7_Recomendacao_por_Cluster.py",
-        "9_Protocolo_Experimental.py",
-        "10_Desfecho_e_Meta.py",
-    ):
+    for nome in ("6_Recomendacao_Treino.py", "8_Validacao_da_Recomendacao.py"):
         arvore = ast.parse((APP / "pages" / nome).read_text(encoding="utf-8"))
         importados = [
             alias.name
@@ -94,25 +90,48 @@ def test_fonte_externa_indisponivel_nao_levanta(monkeypatch=None):
 def test_comparacao_modelos_avisa_sobre_protocolo_antigo():
     texto = (APP / "pages" / "3_Comparacao_Modelos.py").read_text(encoding="utf-8")
 
-    assert "Protocolo Experimental" in texto
+    assert "Validação da recomendação" in texto
     assert "ADR-017" in texto
 
 
-def test_home_lista_as_telas_novas():
+def test_home_lista_telas_atuais():
     texto = (APP / "Home.py").read_text(encoding="utf-8")
 
-    assert "Recomendação por Cluster" in texto
-    assert "Protocolo Experimental" in texto
-    assert "Desfecho e Meta" in texto
+    assert "Recomendação de Treino" in texto
+    assert "Validação da recomendação" in texto
+    assert "Protocolo Experimental" not in texto
+    assert "Recomendação por Cluster" not in texto
+    assert "Desfecho e Meta" not in texto
 
 
-def test_protocolo_experimental_prioriza_recomendacao():
-    texto = (APP / "pages" / "9_Protocolo_Experimental.py").read_text(encoding="utf-8")
+def test_recomendacao_treino_e_por_cluster_com_ficha():
+    texto = (APP / "pages" / "6_Recomendacao_Treino.py").read_text(encoding="utf-8")
+
+    assert "recomendacao_cluster_atleta" in texto
+    assert "recomendacao_regras" not in texto
+    assert "Posição relativa" in texto
+    assert "Na amostra global" in texto
+    assert "No cluster" in texto
+    assert "Ficha do cluster" in texto
+    assert "plotar_ficha_atleta" in texto
+    assert "perfil_multidim_com_cluster" in texto
+    assert "corridas_janela_atleta" in texto
+    assert "Janela deslizante" in texto
+
+
+def test_validacao_recomendacao_prioriza_regra_vs_baselines():
+    texto = (APP / "pages" / "8_Validacao_da_Recomendacao.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "Validação da recomendação" in texto
+    assert "A regra funciona?" in texto
+    assert "recomendação vs baselines" in texto
+    assert "**Déficit**" in texto
+    assert "**Baseline**" in texto
     assert "Conclusão em 30 segundos" in texto
     assert "Matriz de confusão" in texto
     assert "Amostra de casos" in texto
-    idx_rec = texto.index("Validação da recomendação")
+    idx_rec = texto.index("A regra vs baselines")
     idx_modelos = texto.index("Modelos auxiliares")
     assert idx_rec < idx_modelos

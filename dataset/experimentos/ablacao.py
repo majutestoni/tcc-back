@@ -1,17 +1,13 @@
 """
-Ablação da regra de recomendação de ADR-007 (ADR-017, item 2).
+Ablação dos componentes da regra de déficit (ADR-017 / ADR-024).
 
-ADR-007 tem quatro componentes que nunca foram testados isoladamente:
+A regra de produto usa metas por perfil_cluster. A ablação fixa uma meta
+representativa (`volume_moderado`) e remove um componente por vez:
 
-1. a meta de distribuição `META`;
-2. os pesos `PESOS_DEFICIT` que priorizam longão e intervalado;
-3. a regra anti-fadiga que troca por "leve" depois de longão/intervalado;
+1. a meta de distribuição;
+2. os pesos `PESOS_DEFICIT`;
+3. a regra anti-fadiga;
 4. a janela `SEMANAS_JANELA = 6`.
-
-Ablação responde "qual destes de fato muda o resultado". Componente cuja
-remoção não altera a métrica é complexidade sem retorno — e, no caso da
-`META`, a ablação mostra se o valor específico importa ou se qualquer meta
-com a mesma ordenação produziria a mesma recomendação.
 """
 
 from __future__ import annotations
@@ -27,10 +23,12 @@ from dataset.experimentos.protocolo_recomendacao import (
     avaliar_recomendador,
     montar_casos,
 )
-from dataset.models.previsao_treino.model import META, PESOS_DEFICIT
+from dataset.models.previsao_treino.model import PESOS_DEFICIT
+from dataset.models.previsao_treino.recomendacao_cluster import META_CLUSTER_PADRAO
 
 META_UNIFORME = dict.fromkeys(TIPOS, 1.0 / len(TIPOS))
 PESOS_NEUTROS = dict.fromkeys(TIPOS, 1.0)
+META_REF = META_CLUSTER_PADRAO
 
 
 @dataclass(frozen=True)
@@ -46,9 +44,9 @@ class Variante:
 def variantes(semanas_grade: tuple[int, ...] = (2, 4, 6, 8, 12)) -> list[Variante]:
     """Configuração completa mais uma variante por componente removido."""
     base = Variante(
-        nome="completa (meta global)",
+        nome="completa (meta volume_moderado)",
         componente="—",
-        meta=META,
+        meta=META_REF,
         pesos=PESOS_DEFICIT,
         usar_antifadiga=True,
         semanas_janela=SEMANAS_JANELA,
@@ -67,7 +65,7 @@ def variantes(semanas_grade: tuple[int, ...] = (2, 4, 6, 8, 12)) -> list[Variant
         Variante(
             nome="sem PESOS_DEFICIT",
             componente="pesos",
-            meta=META,
+            meta=META_REF,
             pesos=PESOS_NEUTROS,
             usar_antifadiga=True,
             semanas_janela=SEMANAS_JANELA,
@@ -75,7 +73,7 @@ def variantes(semanas_grade: tuple[int, ...] = (2, 4, 6, 8, 12)) -> list[Variant
         Variante(
             nome="sem anti-fadiga",
             componente="anti-fadiga",
-            meta=META,
+            meta=META_REF,
             pesos=PESOS_DEFICIT,
             usar_antifadiga=False,
             semanas_janela=SEMANAS_JANELA,
@@ -94,7 +92,7 @@ def variantes(semanas_grade: tuple[int, ...] = (2, 4, 6, 8, 12)) -> list[Variant
         Variante(
             nome=f"janela = {semanas} semanas",
             componente="janela",
-            meta=META,
+            meta=META_REF,
             pesos=PESOS_DEFICIT,
             usar_antifadiga=True,
             semanas_janela=semanas,

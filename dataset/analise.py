@@ -318,7 +318,12 @@ def _formatar_valor_feature(col: str, valor: float) -> str:
 
 
 def tabela_percentis_atleta(perfil: pl.DataFrame, athlete_id: int) -> pl.DataFrame:
-    """Percentil do atleta em cada feature (0–100; maior = melhor posição relativa)."""
+    """
+    Percentil do atleta em cada feature (0–100; maior = melhor posição relativa).
+
+    O ranking usa exatamente o DataFrame `perfil` passado: amostra global ou
+    só os atletas do mesmo cluster.
+    """
     subset = perfil.filter(pl.col(COL_ATHLETE) == athlete_id)
     if subset.height == 0:
         raise ValueError(f"Atleta {athlete_id} não encontrado no perfil.")
@@ -340,6 +345,7 @@ def tabela_percentis_atleta(perfil: pl.DataFrame, athlete_id: int) -> pl.DataFra
             "valor": _formatar_valor_feature(col, float(valor)),
             "percentil": round(percentil, 1),
             "posicao": f"P{round(percentil):.0f}",
+            "n_referencia": int(valores.size),
         })
 
     return pl.DataFrame(linhas)
@@ -487,8 +493,13 @@ def plotar_painel_posicao_atleta(
     perfil: pl.DataFrame,
     athlete_id: int,
     max_fundo: int = 120,
+    escopo: str = "amostra global",
 ) -> Figure:
-    """Painel com radar (percentis) + coordenadas paralelas para um atleta."""
+    """
+    Painel com radar (percentis) + coordenadas paralelas para um atleta.
+
+    `perfil` é o grupo de referência do ranking: amostra inteira ou só o cluster.
+    """
     fig = plt.figure(figsize=(16, 6))
     ax_radar = fig.add_subplot(121, polar=True)
     ax_par = fig.add_subplot(122)
@@ -501,7 +512,7 @@ def plotar_painel_posicao_atleta(
     genero = perfil.filter(pl.col(COL_ATHLETE) == athlete_id)[COL_GENDER][0]
     genero_txt = "Masculino" if str(genero).upper() == "M" else "Feminino"
     fig.suptitle(
-        f"Perfil multidimensional — atleta {athlete_id} ({genero_txt})",
+        f"Posição relativa ({escopo}) — atleta {athlete_id} ({genero_txt})",
         fontsize=13,
     )
     plt.tight_layout()

@@ -68,7 +68,12 @@ Regressor` em pace e o XGBoost em tempo — esses sim com diferença real.
 
 ---
 
-## 2. A regra de recomendação não funciona
+## 2. A regra de recomendação (meta global) não funcionava
+
+> **Atualização (ADR-024):** a recomendação de produto passou a usar **só**
+> déficit vs meta do **cluster**. Os números abaixo são do protocolo antigo
+> com a `META` global (60/20/12/8), mantidos como histórico do porquê ela
+> foi abandonada.
 
 Coloquei a regra por **déficit vs meta global** para competir com recomendadores
 propositalmente bobos, no mesmo teste: dado o histórico do atleta até hoje, qual
@@ -79,13 +84,13 @@ será o tipo do próximo treino dele?
 | Sorteia da distribuição do próprio atleta | 35% | **0,341** |
 | Repete o último treino | 32% | 0,316 |
 | Sorteio uniforme (chute puro) | 24% | 0,233 |
-| **Déficit vs meta global** | 26% | **0,142** |
+| **Déficit vs meta global** (abandonada) | 26% | **0,142** |
 | Sempre "leve" | 34% | 0,128 |
 
-A regra fica em penúltimo. Ela perde de "sempre leve" com significância
-estatística (`p = 0,0007`) e **empata com o chute puro** (`p = 1,0`).
+A regra global ficava em penúltimo. Ela perdia de "sempre leve" com significância
+estatística (`p = 0,0007`) e **empatava com o chute puro** (`p = 1,0`).
 
-**Por quê?** Porque ela recomenda `leve` em **78%** dos casos. Ela é praticamente
+**Por quê?** Porque ela recomendava `leve` em **78%** dos casos. Era praticamente
 a constante "leve" disfarçada de regra. A causa está no experimento 4.
 
 **A ablação** (remover um componente por vez) mostrou o que cada parte da regra
@@ -198,14 +203,15 @@ consegue produzir — não inventar novos números.
 
 | Tela | Pergunta que ela responde | Se você só olhar uma coisa |
 |---|---|---|
-| 🔬 Protocolo Experimental · topo | A regra de recomendação funciona? | A caixa verde **Conclusão em 30 segundos** |
-| 🔬 Protocolo · aba 1 | A regra (e o cluster) batem o trivial? | Gráfico de barras + **`rec_leve`** + matriz de confusão |
-| 🔬 Protocolo · aba 2 | Quais partes da regra importam? | A coluna **`delta_f1_vs_completa`**: verde = remover melhorou |
-| 🔬 Protocolo · aba 3 | Os números dos modelos auxiliares são confiáveis? | A coluna **`otimismo`** |
-| 🎯 Desfecho e Meta · aba 1 | O desfecho é plausível? | O histograma de tempos (deve parecer uma distribuição amadora) |
-| 🎯 Desfecho · aba 2 | A composição de treino importa? | A linha **`B: A + composição`** e o `p_holm` dela |
-| 🎯 Desfecho · aba 3 | A meta é alcançável? | O gráfico: o ponto **vermelho** do `leve` cai **fora** da barra cinza |
+| 🔬 Validação da recomendação · topo | A regra funciona? | A caixa verde **Conclusão em 30 segundos** |
+| 🔬 Validação · aba 1 (vs baselines) | A regra por cluster bate o trivial? | Gráfico de barras + **`rec_leve_%`** + matriz de confusão |
+| 🔬 Validação · aba 2 | Quais partes da regra importam? | A coluna **`delta_f1_vs_completa`**: verde = remover melhorou |
+| 🔬 Validação · aba 3 | Os números dos modelos auxiliares são confiáveis? | A coluna **`otimismo`** |
+| 🏃 Recomendação de Treino | Qual o próximo treino do atleta (por cluster)? | Ficha do cluster + bloco **Próximo treino recomendado** |
 | 📈 Comparação de Modelos | (métricas antigas, mantidas por paridade com o notebook) | O aviso amarelo no topo |
+
+> Desfecho de prova / meta aprendida saíram do menu Streamlit (ADR-023); os
+> experimentos continuam via `python -m dataset.experimentos desfecho|meta`.
 
 As telas são densas de propósito — elas são a evidência. Para apresentar, use a
 caixa de conclusão de cada aba e deixe as tabelas nos expanders.

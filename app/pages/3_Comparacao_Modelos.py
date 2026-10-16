@@ -38,7 +38,7 @@ st.warning(
     com o notebook.
 
     Para os números corrigidos (particionamento por atleta, intervalos de
-    confiança e testes pareados), veja a tela **🔬 Protocolo Experimental**.
+    confiança e testes pareados), veja a tela **Validação da recomendação**.
     """
 )
 

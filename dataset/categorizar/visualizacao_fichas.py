@@ -286,13 +286,17 @@ def plotar_fichas_atletas(
     return fig
 
 
-def plotar_ficha_atleta(fichas: pl.DataFrame, athlete_id: int) -> Figure:
+def plotar_ficha_atleta(
+    fichas: pl.DataFrame,
+    athlete_id: int,
+    figsize: tuple[float, float] = (6.5, 5.2),
+) -> Figure:
     subset = fichas.filter(pl.col(COL_ATHLETE) == athlete_id)
     if subset.height == 0:
         raise ValueError(f"Atleta {athlete_id} não encontrado nas fichas.")
 
-    fig, ax = plt.subplots(figsize=(6.5, 5.2))
+    fig, ax = plt.subplots(figsize=figsize)
     _desenhar_ficha(ax, subset.row(0, named=True))
-    fig.suptitle("Ficha do atleta", fontsize=13)
+    fig.suptitle("Ficha do atleta", fontsize=11)
     plt.tight_layout()
     return fig

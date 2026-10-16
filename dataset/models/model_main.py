@@ -1,23 +1,28 @@
 import polars as pl
+
+from dataset.categorizar.kmeans import treina_kmeans_por_genero
+from dataset.categorizar.nomear_clusters import nomear_categorias
+from dataset.constants import COL_DISTANCE, COL_PACE
+from dataset.models.previsao_treino.recomendacao_cluster import (
+    atletas_exemplo_por_perfil,
+    exibir_card_recomendacao,
+    gerar_recomendacoes_por_cluster,
+)
 from dataset.preprocessamento import preprocessar
-from dataset.models.previsao_pace.random_forest import treina_random_forest
-from dataset.models.previsao_pace.linear_regression import treina_linear_regression
-from dataset.models.previsao_pace.random_forest_regressor import treina_random_forest_regressor
-from dataset.models.previsao_tempo.random_forest import treina_random_tempo
-from dataset.models.previsao_treino.model import treina_modelo
-from dataset.models.previsao_treino.random_forest import treina_rf_recomendacao
 
 df = pl.read_csv("dataset/raw-data-kaggle.csv", separator=";")
 df = preprocessar(df)
 
-## Previsão de pace ##
-# treina_linear_regression(df)
-# treina_random_forest(df)
-# treina_random_forest_regressor(df)
-
-## tempo
-# treina_random_tempo(df)
-
-## treino
-treina_modelo(df)
-# treina_rf_recomendacao(df, usar_grid=False)
+## Recomendação de treino — só por cluster (ADR-024)
+resultado = treina_kmeans_por_genero(
+    df,
+    features=[COL_DISTANCE, COL_PACE],
+    n_clusters=2,
+    plotar=False,
+    verbose=False,
+)
+perfil = nomear_categorias(resultado.df_exibir)
+recs = gerar_recomendacoes_por_cluster(df, perfil)
+print(f"Recomendações por cluster: {recs.height} atletas")
+for aid in atletas_exemplo_por_perfil(perfil):
+    exibir_card_recomendacao(df, recs, aid)
