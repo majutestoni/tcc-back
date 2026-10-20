@@ -100,12 +100,13 @@ def recomendar_proximo_treino(
     parametros: dict | None = None,
     pesos: dict[str, float] | None = None,
     usar_antifadiga: bool = True,
+    distancias_atleta_por_tipo: dict[str, float] | None = None,
 ) -> dict:
     """
-    Escolhe o tipo de maior déficit ponderado, com guarda anti-fadiga.
+    Escolhe o tipo de maior déficit ponderado, com guarda anti-fadiga e
+    distância misturada ao histórico do atleta (ADR-026).
 
-    `pesos` e `usar_antifadiga` existem para a ablação de ADR-017; os padrões
-    reproduzem exatamente o comportamento de ADR-007.
+    `pesos` e `usar_antifadiga` existem para a ablação de ADR-017.
     """
     params_map = parametros or PARAMETROS
     pesos_uso = pesos if pesos is not None else PESOS_DEFICIT
@@ -117,7 +118,12 @@ def recomendar_proximo_treino(
 
     if usar_antifadiga and ultimos_treinos:
         ultimo = ultimos_treinos[-1]
-        if ultimo == "intervalado" and tipo in ("intervalado", "longao"):
+        recentes = ultimos_treinos[-3:]
+        n_duros = sum(1 for t in recentes if t in ("intervalado", "longao"))
+        # Carga recente: 2+ intensos nos últimos 3 → regenerativo
+        if n_duros >= 2 and tipo in ("intervalado", "longao"):
+            tipo = "leve"
+        elif ultimo == "intervalado" and tipo in ("intervalado", "longao"):
             tipo = "leve"
         elif ultimo == "longao" and tipo == "longao":
             tipo = "leve"
@@ -125,6 +131,14 @@ def recomendar_proximo_treino(
     params = params_map[tipo]
     dist_min, dist_max = params["distancia_km"]
     distancia_km = (dist_min + dist_max) / 2
+    ref = (distancias_atleta_por_tipo or {}).get(tipo)
+    if ref is not None and ref > 0:
+        # Mistura cluster × atleta; longão sobe no máx. ~12% além do típico
+        misturada = 0.55 * distancia_km + 0.45 * float(ref)
+        if tipo == "longao":
+            misturada = min(misturada, float(ref) * 1.12)
+        distancia_km = max(3.0, misturada)
+
     pace_alvo = pace_medio_atleta + params["pace_offset_min"]
 
     return {
@@ -201,11 +215,21 @@ def _gerar_recomendacoes(
             continue
 
         pace_medio = pace_row["pace_medio_atleta"][0]
+        hist_aid = df_janela.filter(pl.col(COL_ATHLETE) == aid)
+        dist_por_tipo = {
+            row[col_tipo]: float(row["dist_km"])
+            for row in (
+                hist_aid.group_by(col_tipo)
+                .agg((pl.col(COL_DISTANCE) / 1000).median().alias("dist_km"))
+                .iter_rows(named=True)
+            )
+        }
         rec = recomendar_proximo_treino(
             deficits=deficits,
             ultimos_treinos=ultimos.get(aid, []),
             pace_medio_atleta=pace_medio,
             parametros=parametros,
+            distancias_atleta_por_tipo=dist_por_tipo,
         )
         rec[COL_ATHLETE] = aid
         rec["metodo"] = metodo

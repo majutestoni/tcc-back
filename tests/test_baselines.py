@@ -177,7 +177,7 @@ def test_baselines_com_cluster_inclui_meta_do_cluster():
 
 
 def test_recomendador_cluster_usa_meta_do_perfil():
-    # volume_moderado pede 70% leve — com histórico só de longão, ainda recomenda leve.
+    # volume_moderado pede ~42% leve — com histórico só de longão, ainda recomenda leve.
     recomendar = recomendador_cluster({1: "volume_moderado"})
     contexto = ContextoAtleta(
         athlete_id=1,

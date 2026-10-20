@@ -26,18 +26,21 @@ NOMES_TIPO = {
     "intervalado": "intervalado",
 }
 
+# Metas alcançáveis (ADR-026): dentro da região p5–p95 do classificador
+# relativo (~leve ∈ [0,12; 0,48]). Polarizadas (mais leve, menos intervalado),
+# sem exigir 60–70% de leve — inalcançável sob ADR-004/019.
 META_POR_PERFIL: dict[str, dict[str, float]] = {
     "volume_alto": {
-        "leve": 0.50,
-        "longao": 0.25,
-        "ritmo": 0.15,
+        "leve": 0.45,
+        "longao": 0.28,
+        "ritmo": 0.17,
         "intervalado": 0.10,
     },
     "volume_moderado": {
-        "leve": 0.70,
-        "longao": 0.15,
-        "ritmo": 0.10,
-        "intervalado": 0.05,
+        "leve": 0.42,
+        "longao": 0.22,
+        "ritmo": 0.22,
+        "intervalado": 0.14,
     },
 }
 

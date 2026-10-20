@@ -203,10 +203,10 @@ consegue produzir — não inventar novos números.
 
 | Tela | Pergunta que ela responde | Se você só olhar uma coisa |
 |---|---|---|
-| 🔬 Validação da recomendação · topo | A regra funciona? | A caixa verde **Conclusão em 30 segundos** |
-| 🔬 Validação · aba 1 (vs baselines) | A regra por cluster bate o trivial? | Gráfico de barras + **`rec_leve_%`** + matriz de confusão |
-| 🔬 Validação · aba 2 | Quais partes da regra importam? | A coluna **`delta_f1_vs_completa`**: verde = remover melhorou |
-| 🔬 Validação · aba 3 | Os números dos modelos auxiliares são confiáveis? | A coluna **`otimismo`** |
+| 🔬 Validação · topo / aba 1 | Aderência à meta do cluster prediz tempo de 21 km? | Caixa verde de **eficácia** + correlação distância→tempo |
+| 🔬 Validação · aba 2 (imitação) | O sistema copia o hábito do Strava? | Aviso amarelo: F1 baixo **não** é nota do produto |
+| 🔬 Validação · aba 3 | Quais partes da regra importam (na imitação)? | **`delta_f1_vs_completa`** |
+| 🔬 Validação · aba 4 | Modelos auxiliares são confiáveis? | Coluna **`otimismo`** |
 | 🏃 Recomendação de Treino | Qual o próximo treino do atleta (por cluster)? | Ficha do cluster + bloco **Próximo treino recomendado** |
 | 📈 Comparação de Modelos | (métricas antigas, mantidas por paridade com o notebook) | O aviso amarelo no topo |
 

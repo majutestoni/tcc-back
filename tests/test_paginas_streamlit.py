@@ -119,19 +119,20 @@ def test_recomendacao_treino_e_por_cluster_com_ficha():
     assert "Janela deslizante" in texto
 
 
-def test_validacao_recomendacao_prioriza_regra_vs_baselines():
+def test_validacao_recomendacao_prioriza_desfecho():
     texto = (APP / "pages" / "8_Validacao_da_Recomendacao.py").read_text(
         encoding="utf-8"
     )
 
     assert "Validação da recomendação" in texto
     assert "A regra funciona?" in texto
-    assert "recomendação vs baselines" in texto
+    assert "eficacia_por_desfecho" in texto
+    assert "Eficácia (desfecho)" in texto
+    assert "Imitação (contraste)" in texto
     assert "**Déficit**" in texto
     assert "**Baseline**" in texto
     assert "Conclusão em 30 segundos" in texto
-    assert "Matriz de confusão" in texto
-    assert "Amostra de casos" in texto
-    idx_rec = texto.index("A regra vs baselines")
+    idx_ef = texto.index("Eficácia (desfecho)")
+    idx_imit = texto.index("Imitação (contraste)")
     idx_modelos = texto.index("Modelos auxiliares")
-    assert idx_rec < idx_modelos
+    assert idx_ef < idx_imit < idx_modelos

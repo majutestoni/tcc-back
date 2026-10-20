@@ -695,6 +695,56 @@ def validacao_encaixada(max_atletas: int = 12000) -> dict:
 
 
 @st.cache_data(persist="disk")
+def eficacia_por_desfecho(max_atletas: int = 12000) -> dict:
+    """
+    ADR-026: aderência às metas do cluster × tempo de meia maratona.
+
+    Só disponível com a fonte externa baixada (`fonte_externa_disponivel`).
+    """
+    from dataset.experimentos.eficacia_desfecho import (
+        comparar_metas_no_desfecho,
+        resumo_aderencia_desfecho,
+        tabela_metas_vs_regiao,
+    )
+    from dataset.models.previsao_treino.recomendacao_cluster import META_CLUSTER_PADRAO
+
+    disponivel, diretorio = fonte_externa_disponivel()
+    if not disponivel:
+        return {
+            "disponivel": False,
+            "diretorio": diretorio,
+            "resumo_padrao": {},
+            "comparacao": pl.DataFrame(),
+            "regiao": pl.DataFrame(),
+            "n": 0,
+        }
+
+    tabela = desfecho_meia(max_atletas)["tabela"]
+    if tabela.height == 0:
+        return {
+            "disponivel": True,
+            "diretorio": diretorio,
+            "resumo_padrao": {},
+            "comparacao": pl.DataFrame(),
+            "regiao": pl.DataFrame(),
+            "n": 0,
+        }
+
+    resumo = resumo_aderencia_desfecho(
+        tabela, meta=META_CLUSTER_PADRAO, nome_meta="cluster · volume_moderado"
+    )
+    return {
+        "disponivel": True,
+        "diretorio": diretorio,
+        "resumo_padrao": resumo,
+        "comparacao": comparar_metas_no_desfecho(tabela),
+        "regiao": tabela_metas_vs_regiao(tabela),
+        "n": tabela.height,
+        "fonte": desfecho_meia(max_atletas).get("fonte", {}),
+    }
+
+
+@st.cache_data(persist="disk")
 def meta_aprendida(max_atletas: int = 12000, n_bootstrap: int = 100) -> dict:
     """Item 4 (ADR-019): meta de distribuição estimada do desfecho de 21 km."""
     from dataset.experimentos.aprender_meta import (
