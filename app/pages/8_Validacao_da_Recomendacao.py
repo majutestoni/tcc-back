@@ -11,8 +11,14 @@ import matplotlib.pyplot as plt
 import polars as pl
 import streamlit as st
 
-from app.shared import ablacao_adr007, avaliacao_protocolo, comparacao_baselines
+from app.shared import (
+    ablacao_adr007,
+    avaliacao_protocolo,
+    comparacao_baselines,
+    eficacia_por_desfecho,
+)
 from dataset.experimentos.baselines import NOME_REGRA_META_CLUSTER
+from dataset.models.previsao_treino.recomendacao_cluster import META_POR_PERFIL
 
 st.set_page_config(
     page_title="Validação da recomendação", page_icon="🔬", layout="wide"
@@ -22,104 +28,186 @@ st.title("Validação da recomendação")
 st.subheader("A regra funciona?")
 st.markdown(
     """
-    **Experimentos — recomendação vs baselines.** Aqui medimos se a regra de
-    produto (**déficit vs meta do cluster**) supera chutes triviais
-    (“sempre leve”, “repete o último”, etc.).
+    **Foco:** eficácia **prescritiva** — atletas mais alinhados à meta do cluster
+    têm melhor tempo de meia maratona? (desfecho externo).
 
-    Não é a tela que **gera** o próximo treino do atleta — isso fica em
-    **Recomendação de Treino**. Aqui é a evidência: ranking, matriz de
-    confusão e ablação. Os modelos de pace/tempo ficam na última aba
-    (auxiliares).
+    A imitação do próximo treino no histórico Strava (~26% de acerto) **não** é
+    o veredito do produto: o dataset não é um plano padronizado. Gerar o
+    próximo treino de um atleta → tela **Recomendação de Treino**.
     """
 )
 
 st.info(
     """
-**Déficit** — quanto falta de cada tipo de treino em relação à meta do cluster
-(`meta − atual` nas últimas 6 semanas). Ex.: meta pede 25% de longão e o atleta
-fez 5% → déficit de longão = +20%. A regra recomenda o tipo com **maior déficit**
-(o que está mais em falta).
+**Déficit** — `meta − atual` por tipo na janela; maior déficit = tipo em falta.
 
-**Baseline** — recomendador **bobo de propósito**, só para comparar. Exemplos:
-sempre “leve”, repetir o último treino, sortear pela distribuição do atleta.
-Se a regra do projeto **não ganha** desses chutes, ela não agrega valor.
+**Baseline** — recomendador trivial só para o experimento de imitação
+(sempre leve, repete o último…). **Não** define se o conselho é bom.
+
+**Aderência** — quão perto a distribuição de treino fica da meta do cluster
+(menor distância = mais aderente). Relacionamos isso ao **tempo de prova**.
     """
 )
 
-with st.spinner("Avaliando recomendadores (cacheado após a 1ª vez)…"):
-    baselines = comparacao_baselines()
+with st.spinner("Carregando evidência de desfecho (se a fonte externa existir)…"):
+    eficacia = eficacia_por_desfecho()
 
-veredito = baselines["veredito"]
-pct_leve = veredito["pct_leve_cluster"] * 100
-derrotas = veredito["derrotas"]
-nome_regra = baselines.get("nome_regra_cluster", NOME_REGRA_META_CLUSTER)
+resumo_ef = eficacia.get("resumo_padrao") or {}
+corr = resumo_ef.get("corr_distancia_tempo")
+n_ef = eficacia.get("n") or 0
 
-st.success(
-    f"""
-**Conclusão em 30 segundos**
+if eficacia.get("disponivel") and n_ef > 0 and corr is not None:
+    t_alta = resumo_ef.get("tempo_mediano_alta_aderencia_min")
+    t_baixa = resumo_ef.get("tempo_mediano_baixa_aderencia_min")
+    delta = (
+        round(t_baixa - t_alta, 1)
+        if t_alta is not None and t_baixa is not None
+        else None
+    )
+    st.success(
+        f"""
+**Conclusão em 30 segundos (eficácia)**
 
-1. A regra **{nome_regra}** recomenda **leve em {pct_leve:.0f}%** dos casos
-   (F1-macro **{veredito["f1_cluster"] * 100:.1f}%**, acerto
-   **{veredito["acerto_cluster"] * 100:.1f}%**).
-2. O melhor no ranking é **`{veredito["melhor_nome"]}`**
-   (F1 **{veredito["melhor_f1"] * 100:.1f}%**) — a regra por cluster
-   {"**perde** de: " + ", ".join(f"`{d}`" for d in derrotas) if derrotas else "não perde com significância dos listados"}.
-3. Isso mede **imitação** (acertou o que o atleta fez), não se o conselho é bom
-   para a prova (isso exigiria um desfecho externo, fora desta tela).
-    """
-)
+1. Em **{n_ef}** atletas com desfecho de ~21 km, a correlação entre
+   *distância à meta do cluster* e *tempo de prova* é **{corr:.3f}**
+   ({resumo_ef.get("interpretacao", "—")}).
+2. Tempo mediano: alta aderência **{t_alta} min** vs baixa aderência
+   **{t_baixa} min**
+   {f"(Δ ≈ **{delta} min** a favor de quem treina mais perto da meta)." if delta is not None else "."}
+3. As metas de produto (`volume_alto` / `volume_moderado`) ficam na **região
+   factível** do classificador — não pedem 60–70% de leve inalcançável.
+4. O teste de **imitação** (aba 2) continua só como contraste negativo:
+   acertar o hábito do Strava ≠ bom plano.
+        """
+    )
+elif not eficacia.get("disponivel"):
+    st.warning(
+        f"""
+**Desfecho externo ainda não baixado** (`{eficacia.get("diretorio")}`).
 
-with st.expander("📖 Termos rápidos (déficit, baseline, F1…)"):
+Rode `bash scripts/baixar_long_distance.sh` para habilitar a evidência de
+eficácia (ADR-018). Enquanto isso, a aba de imitação mostra o experimento
+antigo — **não** use o F1 ~26% como nota da recomendação.
+        """
+    )
+else:
+    st.warning("Tabela de desfecho vazia — não foi possível calcular aderência.")
+
+with st.expander("📖 Termos rápidos"):
     st.markdown(
         """
         | Termo | Em uma frase |
         |---|---|
-        | **Déficit** | `meta − atual` por tipo na janela; maior déficit = tipo mais em falta → próximo treino. |
-        | **Baseline** | Recomendador trivial (sempre leve, repete o último…) usado como piso de comparação. |
-        | **Origem rolante** | Para cada treino recente, o sistema só vê o histórico anterior e tenta acertar o tipo daquele treino. |
-        | **F1-macro** | Média do acerto em **cada** um dos 4 tipos. Quem sempre fala "leve" tem acerto ok e F1 baixo. |
-        | **`rec_leve_%`** | % das recomendações que foram "leve". Se ~80%, a regra virou constante. |
-        | **`p_holm`** | Chance de o resultado ser sorte, já corrigida por várias comparações. &lt; 0,05 = diferença real. |
-        | **GroupKFold** | (aba de modelos) atleta nunca aparece em treino e teste ao mesmo tempo. |
+        | **Aderência** | Quão perto a mistura leve/longão/ritmo/intervalado fica da meta. |
+        | **Desfecho** | Melhor tempo ~21 km do atleta (proxy de capacidade). |
+        | **Déficit** | `meta − atual`; guia o *próximo* treino na demo. |
+        | **Imitação** | Acertar o próximo tipo que o atleta já fez no histórico. |
+        | **Baseline** | Chute trivial no teste de imitação. |
+        | **F1-macro** | Métrica de imitação — não de qualidade do conselho. |
 
         Detalhes em `GUIA-EXPERIMENTOS.md`.
         """
     )
 
-aba_rec, aba_ablacao, aba_modelos = st.tabs(
+aba_ef, aba_imit, aba_ablacao, aba_modelos = st.tabs(
     [
-        "1 · A regra vs baselines",
-        "2 · Ablação da regra",
-        "3 · Modelos auxiliares (pace/tempo)",
+        "1 · Eficácia (desfecho)",
+        "2 · Imitação (contraste)",
+        "3 · Ablação da regra",
+        "4 · Modelos auxiliares (pace/tempo)",
     ]
 )
 
 
-with aba_rec:
-    st.header("A regra supera o trivial?")
+with aba_ef:
+    st.header("Aderência à meta do cluster × tempo de prova")
     st.markdown(
-        f"""
-        Método: **origem rolante** — {baselines["casos"]} casos em
-        {baselines["atletas"]} atletas. O recomendador vê só o passado e tenta
-        acertar o tipo da próxima corrida que o atleta **de fato fez**.
+        """
+        Fonte externa (long-distance). Menor `distancia_meta` = treino mais
+        alinhado à meta. Correlação **positiva** com tempo = quem desvia mais
+        da meta tende a prova **mais lenta**.
         """
     )
-    st.info(
-        "**O que medimos:** imitação. **O que não medimos:** se o conselho é "
-        "bom para a prova (exigiria desfecho externo)."
+    st.markdown("**Metas de produto (alcançáveis)**")
+    st.write(
+        {
+            chave: {t: f"{p * 100:.0f}%" for t, p in meta.items()}
+            for chave, meta in META_POR_PERFIL.items()
+        }
     )
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Acerto (meta do cluster)", f"{veredito['acerto_cluster'] * 100:.1f}%")
-    m2.metric("F1-macro (meta do cluster)", f"{veredito['f1_cluster'] * 100:.1f}%")
-    m3.metric("% recomenda leve", f"{pct_leve:.0f}%")
+    if not eficacia.get("disponivel"):
+        st.info("Baixe a fonte externa para ver gráficos e tabelas desta aba.")
+    elif n_ef == 0:
+        st.info("Sem linhas de desfecho.")
+    else:
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Atletas (21 km)", n_ef)
+        m2.metric(
+            "Corr(distância→tempo)",
+            f"{corr:.3f}" if corr is not None else "—",
+        )
+        m3.metric(
+            "Tempo · alta aderência",
+            f"{resumo_ef.get('tempo_mediano_alta_aderencia_min')} min",
+        )
+        m4.metric(
+            "Tempo · baixa aderência",
+            f"{resumo_ef.get('tempo_mediano_baixa_aderencia_min')} min",
+        )
 
-    st.subheader("Ranking: regra do projeto vs baselines")
-    st.caption(
-        "Valores em **%**. Destaque vermelho = regra do TCC "
-        f"(`{NOME_REGRA_META_CLUSTER}`). "
-        "Olhe sobretudo **f1_macro_%** e **rec_leve_%**."
+        st.subheader("Comparação de metas no desfecho")
+        st.caption(
+            "Maior correlação = aderência a essa meta prediz melhor o tempo."
+        )
+        st.dataframe(eficacia["comparacao"], width="stretch", hide_index=True)
+
+        st.subheader("Metas dentro da região observada (p5–p95)?")
+        regiao = eficacia["regiao"]
+        st.dataframe(regiao, width="stretch", hide_index=True)
+        fora = regiao.filter(~pl.col("dentro_da_regiao")) if regiao.height else regiao
+        if fora.height:
+            st.error(
+                "Componentes fora da região: "
+                + ", ".join(
+                    f"{r['perfil']}/{r['tipo']}={r['meta']}"
+                    for r in fora.iter_rows(named=True)
+                )
+            )
+        else:
+            st.success("Todas as metas de cluster estão dentro do p5–p95 observado.")
+
+
+with aba_imit:
+    st.header("Imitação — contraste negativo")
+    st.warning(
+        """
+        Este protocolo pergunta: “acertamos o próximo tipo que o atleta **já
+        fez**?”. No Strava sem plano, isso mede hábito, não qualidade do
+        conselho. Baselines que **copiam** o histórico ganham — e isso é
+        esperado. **Não** use F1/acerto daqui como nota do produto.
+        """
     )
+
+    with st.spinner("Avaliando imitação (cacheado após a 1ª vez)…"):
+        baselines = comparacao_baselines()
+
+    veredito = baselines["veredito"]
+    pct_leve = veredito["pct_leve_cluster"] * 100
+    derrotas = veredito["derrotas"]
+    nome_regra = baselines.get("nome_regra_cluster", NOME_REGRA_META_CLUSTER)
+
+    st.markdown(
+        f"""
+        Regra **{nome_regra}**: F1-macro
+        **{veredito["f1_cluster"] * 100:.1f}%**, acerto
+        **{veredito["acerto_cluster"] * 100:.1f}%**, recomenda leve em
+        **{pct_leve:.0f}%**. Melhor no ranking de imitação:
+        `{veredito["melhor_nome"]}` (F1 {veredito["melhor_f1"] * 100:.1f}%).
+        """
+    )
+
+    st.subheader("Ranking (imitação)")
     tabela = baselines["tabela"]
     st.dataframe(tabela, width="stretch")
 
@@ -130,34 +218,23 @@ with aba_rec:
         "#F44336" if n == NOME_REGRA_META_CLUSTER else "#90A4AE" for n in nomes
     ]
     ax.barh(nomes, tabela[col_f1].to_list(), color=cores)
-    ax.set_xlabel("F1-macro (%)")
-    ax.set_title("Regra do projeto (vermelho) vs baselines")
+    ax.set_xlabel("F1-macro (%) — só imitação")
+    ax.set_title("Vermelho = regra do projeto (não é o veredito de eficácia)")
     ax.invert_yaxis()
     fig.tight_layout()
     st.pyplot(fig)
     plt.close(fig)
 
-    st.subheader(f"Confrontos diretos com `{nome_regra}`")
-    confrontos = baselines["confrontos"]
-    st.dataframe(confrontos, width="stretch")
+    st.subheader(f"Confrontos com `{nome_regra}`")
+    st.dataframe(baselines["confrontos"], width="stretch")
     if derrotas:
-        st.error(
-            f"A regra **{nome_regra}** **perde** com significância estatística para: "
-            + ", ".join(f"`{r}`" for r in derrotas)
-            + "."
+        st.caption(
+            "Perder de baselines de cópia no teste de imitação é esperado e "
+            "**não** invalida a regra prescritiva."
         )
-    else:
-        st.warning("Nenhuma derrota significativa listada nos confrontos filtrados.")
 
-    st.subheader("Matriz de confusão — déficit vs meta do cluster")
-    st.caption("Linhas = o que o atleta fez · Colunas = o que o sistema recomendou.")
+    st.subheader("Matriz / amostra (cluster)")
     st.dataframe(baselines["matriz_cluster"], width="stretch")
-
-    st.subheader("Amostra de casos — déficit vs meta do cluster")
-    st.caption(
-        "Cada linha: últimos 5 tipos do histórico → o que aconteceu (`real`) "
-        "vs o que a regra pediu (`predito`)."
-    )
     st.dataframe(baselines["amostra_cluster"], width="stretch")
 
 
@@ -165,9 +242,9 @@ with aba_ablacao:
     st.header("Quais partes da regra realmente importam?")
     st.markdown(
         """
-        Removemos um componente por vez (meta de referência = `volume_moderado`).
-        Se a métrica **não muda**, o componente é complexidade sem retorno.
-        Se **melhora** ao remover, o componente atrapalha.
+        Removemos um componente por vez (meta de referência = `volume_moderado`
+        alcançável). Se a métrica **não muda**, o componente é complexidade
+        sem retorno. *Atenção:* a métrica aqui ainda é de **imitação**.
         """
     )
 
@@ -178,11 +255,8 @@ with aba_ablacao:
     ablacao_exibir = ablacao.with_columns(
         [(pl.col(c) * 100).round(2).alias(f"{c}_%") for c in cols_pct]
     )
-    st.caption("Colunas `*_ %` em percentual.")
+    st.caption("Colunas `*_ %` em percentual (imitação).")
     st.dataframe(ablacao_exibir, width="stretch")
-    st.markdown(
-        "**`delta_f1_vs_completa_%` > 0** = remover o componente _melhorou_ o resultado."
-    )
 
     fig, ax = plt.subplots(figsize=(9, 4.5))
     variantes = ablacao["variante"].to_list()
@@ -190,31 +264,20 @@ with aba_ablacao:
     cores = ["#4CAF50" if d > 0 else "#F44336" if d < 0 else "#90A4AE" for d in deltas]
     ax.barh(variantes, deltas, color=cores)
     ax.axvline(0, color="black", linewidth=0.8)
-    ax.set_xlabel("Δ F1-macro vs configuração completa (pontos percentuais)")
-    ax.set_title("Verde = remover o componente melhorou")
+    ax.set_xlabel("Δ F1-macro vs completa (pp) — imitação")
+    ax.set_title("Verde = remover o componente melhorou a imitação")
     ax.invert_yaxis()
     fig.tight_layout()
     st.pyplot(fig)
     plt.close(fig)
-
-    inertes = ablacao.filter(pl.col("delta_f1_vs_completa").abs() < 0.002)
-    if inertes.height:
-        st.warning(
-            "Componentes **inertes** (efeito &lt; 0,2 pp de F1-macro): "
-            + ", ".join(
-                f"`{r}`" for r in inertes["componente_removido"].to_list() if r != "—"
-            )
-        )
 
 
 with aba_modelos:
     st.header("Modelos auxiliares — particionamento por atleta")
     st.markdown(
         """
-        Aqui estão pace/tempo/classificadores sob o protocolo correto
-        (`GroupKFold` por atleta). **Não é a validação da recomendação** —
-        serve para mostrar que as métricas antigas (tela Comparação de Modelos)
-        eram otimistas.
+        Pace/tempo sob `GroupKFold` por atleta. **Não** é a validação da
+        recomendação — mostra otimismo do split antigo (tela Comparação).
         """
     )
 
@@ -223,14 +286,6 @@ with aba_modelos:
 
     st.caption(f"Protocolo: {protocolo['protocolo']}")
     st.dataframe(protocolo["comparativa"], width="stretch")
-
-    st.markdown(
-        """
-        **Como ler.** `valor` = métrica no protocolo correto (com IC).
-        `protocolo_antigo` = split aleatório por corrida.
-        **`otimismo` > 0** = o protocolo antigo inflava o número.
-        """
-    )
 
     comparativa = protocolo["comparativa"]
     otimismos = comparativa.filter(pl.col("otimismo").is_not_null())
@@ -249,20 +304,10 @@ with aba_modelos:
         st.pyplot(fig)
         plt.close(fig)
 
-    st.subheader("Testes pareados (Wilcoxon + Holm)")
     pareados = protocolo["pareados"]
     if pareados.height:
+        st.subheader("Testes pareados (Wilcoxon + Holm)")
         st.dataframe(pareados, width="stretch")
-        empates = pareados.filter(~pl.col("significativa"))
-        if empates.height:
-            st.warning(
-                "Pares **sem diferença estatística**:\n\n"
-                + "\n".join(
-                    f"- {r['modelo_a']} × {r['modelo_b']} "
-                    f"(`p_holm = {r['p_holm']:.3g}`)"
-                    for r in empates.iter_rows(named=True)
-                )
-            )
 
     if protocolo["ressalvas"]:
         st.subheader("Ressalvas metodológicas")

@@ -440,6 +440,17 @@ Novo pacote [dataset/fontes/](dataset/fontes/) com `FonteDados` (schema canônic
 
 **Consequências:** O menu lateral Streamlit passa a mostrar “Validacao da Recomendacao”. A lógica/loaders não mudam.
 
+### ADR-026 — Eficácia por desfecho; metas alcançáveis; imitação demovida
+**Status:** Aceita
+**Contexto:** O acerto ~26% / F1 baixo na origem rolante fazia a recomendação parecer “ruim”, mas o teste mede **imitação** de hábitos Strava não padronizados — não qualidade do conselho (já ressalvado em ADR-017/018). A usuária pediu (1) evidência por desfecho, (2) redesign da Validação e (3) regra/meta melhores.
+
+**Decisão:**
+1. **Eficácia:** módulo [eficacia_desfecho.py](dataset/experimentos/eficacia_desfecho.py) + loader `eficacia_por_desfecho` — correlação distância-à-meta × tempo de meia e tempos por tercil de aderência (fonte ADR-018).
+2. **UI:** [8_Validacao_da_Recomendacao.py](app/pages/8_Validacao_da_Recomendacao.py) — aba 1 = desfecho (veredito); aba 2 = imitação rotulada como contraste negativo.
+3. **Metas de produto** `META_POR_PERFIL` recalibradas para a região factível (leve ≈ 0,42–0,45, não 0,50–0,70). Distância do treino mistura mediana do cluster com a do atleta; anti-fadiga considera carga (2 intensos nos últimos 3 → leve).
+
+**Consequências:** `META` global de ADR-007 permanece só em experimentos históricos. Cache Streamlit de recomendações/baselines deve ser limpo após o deploy. Sem a fonte externa baixada, a aba 1 pede `scripts/baixar_long_distance.sh`.
+
 ---
 
 ## 4. Convenções
@@ -471,7 +482,8 @@ Novo pacote [dataset/fontes/](dataset/fontes/) com `FonteDados` (schema canônic
 | Como clonar e rodar em outra máquina? | `bash run.sh` (macOS/Linux) ou `.\run.ps1` (Windows). Cria venv, instala `requirements.txt`, gera `.env` e sobe o Streamlit. |
 | Como avaliar um modelo corretamente? | `dataset.avaliacao.avaliar` com `EspecModelo` — **nunca** `train_test_split` por corrida (ADR-017). Particionamento é por **atleta**. |
 | Como rodar os experimentos? | CLI: `python -m dataset.experimentos protocolo\|baselines\|desfecho\|meta\|tudo` (os dois últimos exigem a fonte externa). No app: tela **Validação da recomendação** (itens 1–2); desfecho/meta só via CLI (ADR-023). |
-| Onde está a validação da recomendação? | Tela **Validação da recomendação** (`8_Validacao_da_Recomendacao.py`, ADR-022/025): ranking vs baselines, matriz, amostra. Desfecho de prova → CLI `desfecho`/`meta`. |
+| Onde está a validação da recomendação? | Tela **Validação da recomendação** (ADR-026): aba 1 eficácia por desfecho; aba 2 imitação só como contraste. CLI `desfecho`/`meta` continua. |
+| Qual a meta do cluster? | `META_POR_PERFIL` alcançável (ADR-026): `volume_alto` ≈ 45/28/17/10; `volume_moderado` ≈ 42/22/22/14 (% leve/longão/ritmo/intervalado). |
 | Por que a tela de Comparação de Modelos mostra números diferentes da tela de Protocolo? | De propósito (ADR-020). A primeira é porte do notebook e usa o split antigo; a segunda usa o protocolo corrigido de ADR-017. As duas coexistem com a diferença rotulada. |
 | Quantas telas o app tem? | 8 (ADR-023/025): Home, Visualização, Comparação de Modelos, Categorização, Atletas, Recomendação de Treino, Histórico, Validação da recomendação. |
 | A recomendação usa os clusters? | Sim — **só** cluster (ADR-024): demo, Gemini, Protocolo e `model_main`. |
@@ -523,3 +535,4 @@ Novo pacote [dataset/fontes/](dataset/fontes/) com `FonteDados` (schema canônic
 | 2026-10-12 | IA (Composer) | **ADR-024**: recomendação exclusivamente por cluster — remove meta global dos baselines/Protocolo/Gemini/`model_main`; fallback `volume_moderado`. |
 | 2026-10-12 | IA (Composer) | **ADR-025**: tela `8_Protocolo_Experimental` renomeada para `8_Validacao_da_Recomendacao` — título/subtítulo/lead descritivos. |
 | 2026-10-12 | IA (Composer) | ADR-025: glossário visível de **Déficit** e **Baseline** no topo da tela de Validação. |
+| 2026-10-20 | IA (Composer) | **ADR-026**: eficácia por desfecho na Validação; metas de cluster alcançáveis; imitação demovida; distância atleta×cluster + anti-fadiga por carga. |
