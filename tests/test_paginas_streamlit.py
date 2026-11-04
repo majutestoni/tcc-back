@@ -36,6 +36,7 @@ def test_todas_as_paginas_compilam():
 def test_paginas_esperadas_existem():
     nomes = {p.name for p in (APP / "pages").glob("*.py")}
 
+    assert "1_Fluxo_do_Sistema.py" in nomes
     assert "6_Recomendacao_Treino.py" in nomes
     assert "7_Historico_Recomendacoes.py" in nomes
     assert "8_Validacao_da_Recomendacao.py" in nomes
@@ -97,11 +98,23 @@ def test_comparacao_modelos_avisa_sobre_protocolo_antigo():
 def test_home_lista_telas_atuais():
     texto = (APP / "Home.py").read_text(encoding="utf-8")
 
+    assert "Fluxo do sistema" in texto
     assert "Recomendação de Treino" in texto
     assert "Validação da recomendação" in texto
     assert "Protocolo Experimental" not in texto
     assert "Recomendação por Cluster" not in texto
     assert "Desfecho e Meta" not in texto
+
+
+def test_fluxo_do_sistema_espelha_fluxo_md():
+    texto = (APP / "pages" / "1_Fluxo_do_Sistema.py").read_text(encoding="utf-8")
+
+    assert "Mapa do fluxo" in texto
+    assert "Tomada de decisão" in texto
+    assert "Por que cada escolha" in texto
+    assert "META_POR_PERFIL" in texto
+    assert "Anti-fadiga" in texto
+    assert "pages/8_Validacao_da_Recomendacao.py" in texto
 
 
 def test_recomendacao_treino_e_por_cluster_com_ficha():
@@ -127,12 +140,14 @@ def test_validacao_recomendacao_prioriza_desfecho():
     assert "Validação da recomendação" in texto
     assert "A regra funciona?" in texto
     assert "eficacia_por_desfecho" in texto
-    assert "Eficácia (desfecho)" in texto
-    assert "Imitação (contraste)" in texto
+    assert "1 · Eficácia (desfecho)" in texto
+    assert "2 · Por que F1 baixo não importa" in texto
     assert "**Déficit**" in texto
     assert "**Baseline**" in texto
-    assert "Conclusão em 30 segundos" in texto
-    idx_ef = texto.index("Eficácia (desfecho)")
-    idx_imit = texto.index("Imitação (contraste)")
-    idx_modelos = texto.index("Modelos auxiliares")
+    assert "Deu certo" in texto or "Conclusão em 30 segundos" in texto
+    assert "Três atletas concretos" in texto
+    assert "Tempo mediano por aderência" in texto
+    idx_ef = texto.index("1 · Eficácia (desfecho)")
+    idx_imit = texto.index("2 · Por que F1 baixo não importa")
+    idx_modelos = texto.index("4 · Modelos auxiliares")
     assert idx_ef < idx_imit < idx_modelos

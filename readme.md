@@ -1,139 +1,232 @@
-# TCC - Ánalise de modelos
+# TCC — Serviço de ML (`tcc-back-2`)
 
-### bases de dados usadas
-- **primária** — https://www.kaggle.com/datasets/olegoaer/running-races-strava
-  (em `dataset/raw-data-kaggle.csv`, separador `;`)
-- **validação externa** (ADR-018) — https://www.kaggle.com/datasets/mexwell/long-distance-running-dataset
-  (CC BY 4.0; 2,3 GB, **não versionada**, baixe com `bash scripts/baixar_long_distance.sh`)
+Pipeline de análise e recomendação de treinos para corredores (Python + Streamlit).
 
-A base externa é o que permite avaliar a recomendação contra um **desfecho de
-prova** (melhor tempo de meia maratona) em vez de contra a própria premissa.
+Para o **fluxo científico** (coleta → limpeza → cluster → recomendação → validação), veja [FLUXO.md](FLUXO.md).  
+Para decisões de arquitetura: [ADR.md](ADR.md). Para a banca: [GUIA-EXPERIMENTOS.md](GUIA-EXPERIMENTOS.md).
 
 ---
 
-## 📖 Comece por aqui
+## Pré-requisitos
 
-**[GUIA-EXPERIMENTOS.md](GUIA-EXPERIMENTOS.md)** — os 4 experimentos e suas
-conclusões em português simples, com glossário dos termos estatísticos, o que
-cada tela do app responde, e perguntas de banca com resposta pronta. Leia antes
-de mexer em `dataset/avaliacao/` ou `dataset/experimentos/`.
-
-O [ADR.md](ADR.md) tem o registro completo das decisões e o *porquê* de cada uma.
+- Python **3.11+** (testado com 3.13)
+- macOS, Linux ou Windows
+- (Opcional) chave [Gemini API](https://aistudio.google.com/apikey) para recomendação por LLM
+- (Opcional) ~2,3 GB livres para a base externa de validação
 
 ---
 
-## 🚀 Setup rápido (clonar e rodar)
-
-Depois de clonar o repositório, um único comando cria o ambiente, instala tudo e sobe o app:
+## Rodar em 1 comando
 
 **macOS / Linux**
+
 ```bash
 bash run.sh
 ```
 
 **Windows (PowerShell)**
+
 ```powershell
 .\run.ps1
 ```
 
-O script cria o `.venv`, instala as dependências do `requirements.txt`, gera o `.env`
-(se não existir) e abre o Streamlit. Depois é só preencher a `GEMINI_API_KEY` no `.env`
-para usar a recomendação via Gemini.
+O script:
+
+1. Cria `.venv` se não existir  
+2. Instala `requirements.txt`  
+3. Copia `.env.example` → `.env` se ainda não houver `.env`  
+4. Sobe o Streamlit em `http://localhost:8501`
+
+Depois, se for usar Gemini, edite `.env` e preencha `GEMINI_API_KEY`.
 
 ---
 
-## Setup manual (passo a passo)
+## Setup manual
 
-###  criar um novo venv caso preciese 
 ```bash
-python -m venv .venv
-```
-### ative o ambiente:
-```bash
-# macOS / Linux
-source .venv/bin/activate
-# Windows (PowerShell)
-.\.venv\Scripts\Activate.ps1
-```
+# 1. Ambiente
+python3 -m venv .venv
+source .venv/bin/activate                 # Windows: .\.venv\Scripts\Activate.ps1
 
-###  Instale as dependências
-```bash
-   pip install -r requirements.txt
-```
+# 2. Dependências
+pip install -r requirements.txt
 
-### recomendação de treino via Gemini
-Configure a chave da API (copie `.env.example` para `.env` e preencha `GEMINI_API_KEY`):
-```bash
+# 3. Variáveis de ambiente (Gemini opcional)
 cp .env.example .env
-```
-Rode a recomendação para um atleta específico:
-```bash
-python -m gemini.recomendacao <athlete_id>
-```
+# edite GEMINI_API_KEY=
 
-### app Streamlit (demo)
-Interface interativa (mantém os notebooks para exploração):
-```bash
+# 4. App
 streamlit run app/Home.py
 ```
 
-### rodar (sem jupyter):
+### Comandos úteis
+
+| Objetivo | Comando |
+|----------|---------|
+| Demo Streamlit | `streamlit run app/Home.py` |
+| Pipeline CLI (recomendação por cluster) | `python -m dataset.models.model_main` |
+| Recomendação Gemini | `python -m gemini.recomendacao <athlete_id>` |
+| Testes | `pytest tests/` |
+| Experimentos | `python -m dataset.experimentos protocolo` (ou `baselines`, `desfecho`, `meta`, `tudo`) |
+| Baixar base externa (desfecho 21 km) | `bash scripts/baixar_long_distance.sh` |
+| Notebooks | `jupyter notebook notebooks/` |
+
+### Variáveis no `.env`
+
+| Variável | Obrigatória? | Default | Uso |
+|----------|--------------|---------|-----|
+| `GEMINI_API_KEY` | Só para Gemini | — | API Google AI |
+| `GEMINI_MODEL` | Não | `gemini-3.6-flash` | Modelo |
+| `GEMINI_TEMPERATURE` | Não | `0.3` | Criatividade (menor = mais estável) |
+
+Nunca commite o `.env` (já está no `.gitignore`).
+
+### Cache do Streamlit
+
+Loaders pesados ficam em `.streamlit/cache/`. Se mudar código de recomendação/metas e a UI parecer “velha”:
+
 ```bash
-    python -m dataset.models.model_main 
+rm -rf .streamlit/cache
 ```
 
-### experimentos (ADR-017, ADR-018, ADR-019)
-```bash
-# item 1 — os 8 modelos sob particionamento por atleta, com IC e testes pareados
-python -m dataset.experimentos protocolo
+---
 
-# item 2 — baselines vs a regra de ADR-007 + ablação dos seus componentes
-python -m dataset.experimentos baselines
+## Estrutura de pastas
 
-# item 3 — validação externa com desfecho de meia maratona (precisa da base externa)
-bash scripts/baixar_long_distance.sh
-python -m dataset.experimentos desfecho --max-atletas 12000
-
-# item 4 — meta de distribuição aprendida do desfecho de 21 km
-python -m dataset.experimentos meta --max-atletas 12000
-
-# tudo de uma vez
-python -m dataset.experimentos tudo
+```text
+tcc-back-2/
+├── app/                      # Demo Streamlit
+│   ├── Home.py               # Página inicial (entrypoint do app)
+│   ├── shared.py             # Loaders cacheados + helpers da UI
+│   └── pages/                # Telas do menu lateral (prefixo numérico = ordem)
+│
+├── dataset/                  # Núcleo de dados e ML
+│   ├── raw-data-kaggle.csv   # Base primária (Strava/Kaggle)
+│   ├── constants.py          # Colunas + limiares (fonte única)
+│   ├── preprocessamento.py   # Limpeza, pace, tipo_treino
+│   ├── analise.py            # EDA / gráficos
+│   ├── categorizar/          # Perfil por regras + KMeans + nomeação
+│   ├── models/               # Modelos e recomendação
+│   │   ├── model_main.py     # CLI: python -m dataset.models.model_main
+│   │   ├── previsao_pace/    # Modelos de pace
+│   │   ├── previsao_tempo/   # Modelos de tempo
+│   │   └── previsao_treino/  # Recomendação (cluster = produto)
+│   ├── fontes/               # Adaptadores Kaggle / long-distance
+│   ├── avaliacao/            # Protocolo por atleta (IC, testes)
+│   └── experimentos/         # Baselines, desfecho, eficácia, meta
+│
+├── gemini/                   # Recomendação via LLM (features + prompt)
+├── notebooks/                # Exploração Jupyter (paridade com algumas telas)
+├── tests/                    # pytest
+├── scripts/                  # Scripts auxiliares (ex.: baixar base externa)
+├── output/                   # Artefatos gerados (atletas.csv, recomendacoes.csv)
+│
+├── run.sh / run.ps1          # Setup + sobe o Streamlit
+├── requirements.txt
+├── .env.example
+├── conftest.py               # Config pytest
+│
+├── readme.md                 # Este arquivo (como rodar + pastas)
+├── FLUXO.md                  # Narrativa ponta a ponta do TCC
+├── ADR.md                    # Decisões de arquitetura
+├── GUIA-EXPERIMENTOS.md      # Experimentos em português simples
+└── SPEC-BACKEND-ORQUESTRADOR.md  # Spec do backend (outro repo)
 ```
 
-### testes
-```bash
-pytest tests/
-```
+---
 
-### notebooks
-```bash
-pip install jupyter
-jupyter notebook notebooks/visualizacao_dataset.ipynb
-jupyter notebook notebooks/comparacao_modelos.ipynb
-jupyter notebook notebooks/categorizacao_corredores.ipynb
-jupyter notebook notebooks/recomendacao_treino.ipynb
-```
+## O que cada pasta faz
 
+### `app/` — interface de demonstração
 
-## Comunicao
-flowchart LR
-    U[Usuário] --> FE[Frontend\nrun-metrics-mate]
-    FE <-->|REST/JSON| BE[Backend\norquestrador]
-    BE <-->|OAuth + sync| ST[Strava API]
-    BE <-->|persistência| DB[(Banco de dados)]
-    BE <-->|análise/predição| ML[Serviço ML\ntcc-back-2]
+| Arquivo / pasta | Função |
+|-----------------|--------|
+| `Home.py` | Entrada do Streamlit |
+| `shared.py` | Carrega dados/modelos com `@st.cache_data` (persist em disco) |
+| `pages/2_…` | Visualização do dataset |
+| `pages/3_…` | Comparação de modelos |
+| `pages/4_…` | Categorização (KMeans) |
+| `pages/5_…` | Tabela de atletas |
+| `pages/6_…` | Recomendação (cluster + Gemini) |
+| `pages/7_…` | Histórico de recomendações |
+| `pages/8_…` | Validação da recomendação |
 
+O menu lateral do Streamlit ordena as páginas pelo **número no nome do arquivo**.
 
-flowchart TD
-    A[Usuário desconectado] --> B{Escolhe provider}
-    B -->|Strava| C[OAuth Strava]
-    B -->|Intervals| D[OAuth Intervals]
-    C --> E[Sessão provider=strava]
-    D --> F[Sessão provider=intervals]
-    E --> G[Sync usa StravaClient]
-    F --> H[Sync usa IntervalsClient]
-    E -->|Conectar Intervals| I[Disconnect Strava + limpa dados]
-    I --> F
-    F -->|Conectar Strava| J[Disconnect Intervals + limpa dados]
-    J --> E
+### `dataset/` — ciência de dados
+
+| Pasta / arquivo | Função |
+|-----------------|--------|
+| `constants.py` | Nomes de coluna (`COL_*`) e thresholds — **não** hardcodar strings no resto do código |
+| `preprocessamento.py` | Pipeline: filtrar → imputar FC → pace → classificar tipo |
+| `categorizar/` | Agregar atleta, perfil interpretável, KMeans, validação de cluster |
+| `models/previsao_treino/` | Regra de recomendação; `recomendacao_cluster.py` é o caminho de produto |
+| `fontes/` | Abstração `FonteDados` (primária vs externa) |
+| `avaliacao/` | GroupKFold por atleta, bootstrap, Wilcoxon/Holm |
+| `experimentos/` | CLI dos experimentos do TCC |
+
+### `gemini/` — LLM
+
+Monta features determinísticas (`features.py`), chama a API (`client.py`) e devolve JSON tipado (`schemas.py`). Histórico em CSV via `historico.py`.
+
+### `notebooks/` — exploração
+
+Espelhados em parte no Streamlit. Úteis para mexer graficamente sem subir o app.
+
+### `tests/` — regressão
+
+Rode `pytest tests/` após mudanças em preprocessamento, recomendação ou telas.
+
+### `output/` — gerado em runtime
+
+Não é código-fonte. Planilhas exportadas pela demo (ex.: recomendações da IA).
+
+### `scripts/` — utilitários
+
+`baixar_long_distance.sh` baixa a base externa usada na validação por desfecho (não versionada; vai para cache local).
+
+---
+
+## Telas do app (o que abrir)
+
+1. **Home** — visão geral  
+2. **Visualização do Dataset** — EDA  
+3. **Comparação de Modelos** — métricas no protocolo *antigo* (paridade notebooks)  
+4. **Categorização** — clusters e fichas  
+5. **Atletas** — lista / filtros  
+6. **Recomendação de Treino** — informe um `athlete_id`  
+7. **Histórico** — recomendações salvas  
+8. **Validação da recomendação** — números defensáveis (*a regra funciona?*)
+
+> Para a aba de eficácia por desfecho (tela 8), baixe antes a base externa com `bash scripts/baixar_long_distance.sh`.
+
+---
+
+## Dependências principais
+
+Definidas em `requirements.txt`:
+
+`polars` · `numpy` · `scipy` · `scikit-learn` · `matplotlib` · `xgboost` · `streamlit` · `google-genai` · `jupyter` · `pytest`
+
+---
+
+## Problemas comuns
+
+| Sintoma | O que fazer |
+|---------|-------------|
+| Gemini falha / 401 | Preencher `GEMINI_API_KEY` no `.env` e reinstalar `google-genai` |
+| Tela 8 pede base externa | `bash scripts/baixar_long_distance.sh` |
+| UI com números antigos | Apagar `.streamlit/cache/` e recarregar |
+| Import lento / sklearn | Normal nas telas de modelo; Atletas deve ser rápido (imports lazy) |
+| `ModuleNotFoundError` | Ativar `.venv` e `pip install -r requirements.txt` na raiz do repo |
+
+---
+
+## Onde ler mais
+
+| Documento | Quando abrir |
+|-----------|--------------|
+| [FLUXO.md](FLUXO.md) | Entender o pipeline completo e o *porquê* de cada etapa |
+| [ADR.md](ADR.md) | Decisão de arquitetura específica |
+| [GUIA-EXPERIMENTOS.md](GUIA-EXPERIMENTOS.md) | Preparar apresentação / banca |
+| [SPEC-BACKEND-ORQUESTRADOR.md](SPEC-BACKEND-ORQUESTRADOR.md) | Integração futura com Strava + frontend |

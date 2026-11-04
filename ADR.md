@@ -445,11 +445,17 @@ Novo pacote [dataset/fontes/](dataset/fontes/) com `FonteDados` (schema canônic
 **Contexto:** O acerto ~26% / F1 baixo na origem rolante fazia a recomendação parecer “ruim”, mas o teste mede **imitação** de hábitos Strava não padronizados — não qualidade do conselho (já ressalvado em ADR-017/018). A usuária pediu (1) evidência por desfecho, (2) redesign da Validação e (3) regra/meta melhores.
 
 **Decisão:**
-1. **Eficácia:** módulo [eficacia_desfecho.py](dataset/experimentos/eficacia_desfecho.py) + loader `eficacia_por_desfecho` — correlação distância-à-meta × tempo de meia e tempos por tercil de aderência (fonte ADR-018).
-2. **UI:** [8_Validacao_da_Recomendacao.py](app/pages/8_Validacao_da_Recomendacao.py) — aba 1 = desfecho (veredito); aba 2 = imitação rotulada como contraste negativo.
+1. **Eficácia:** módulo [eficacia_desfecho.py](dataset/experimentos/eficacia_desfecho.py) + loader `eficacia_por_desfecho` — correlação distância-à-meta × tempo de meia, tempos por tercil e exemplos de atletas (fonte ADR-018).
+2. **UI:** [8_Validacao_da_Recomendacao.py](app/pages/8_Validacao_da_Recomendacao.py) — aba 1 = desfecho (caixa **Deu certo**, gráfico de tercis, 3 atletas concretos); aba 2 = *Por que F1 baixo não importa* (teste antigo; detalhes em expanders).
 3. **Metas de produto** `META_POR_PERFIL` recalibradas para a região factível (leve ≈ 0,42–0,45, não 0,50–0,70). Distância do treino mistura mediana do cluster com a do atleta; anti-fadiga considera carga (2 intensos nos últimos 3 → leve).
 
 **Consequências:** `META` global de ADR-007 permanece só em experimentos históricos. Cache Streamlit de recomendações/baselines deve ser limpo após o deploy. Sem a fonte externa baixada, a aba 1 pede `scripts/baixar_long_distance.sh`.
+
+### ADR-027 — Tela Streamlit “Fluxo do sistema” (mapa de FLUXO.md)
+**Status:** Aceita
+**Contexto:** O documento [FLUXO.md](FLUXO.md) descreve o pipeline e o *porquê* das decisões, mas ficava só no repositório — a demo Streamlit não tinha uma tela de orientação para banca/apresentação.
+**Decisão:** Nova página [app/pages/1_Fluxo_do_Sistema.py](app/pages/1_Fluxo_do_Sistema.py) (primeira no menu), espelhando `FLUXO.md` em quatro abas: mapa (caixas HTML nativas — sem Mermaid/CDN), etapas detalhadas, tomada de decisão da regra (10 passos + anti-fadiga) e tabela “por que cada escolha”. Atalhos `st.page_link` para Visualização, Categorização, Recomendação e Validação. Sem loaders pesados.
+**Consequências:** Home e §7 de `FLUXO.md` listam a nova tela. Conteúdo narrativo continua em `FLUXO.md` (fonte); a página é a vitrine.
 
 ---
 
@@ -482,7 +488,8 @@ Novo pacote [dataset/fontes/](dataset/fontes/) com `FonteDados` (schema canônic
 | Como clonar e rodar em outra máquina? | `bash run.sh` (macOS/Linux) ou `.\run.ps1` (Windows). Cria venv, instala `requirements.txt`, gera `.env` e sobe o Streamlit. |
 | Como avaliar um modelo corretamente? | `dataset.avaliacao.avaliar` com `EspecModelo` — **nunca** `train_test_split` por corrida (ADR-017). Particionamento é por **atleta**. |
 | Como rodar os experimentos? | CLI: `python -m dataset.experimentos protocolo\|baselines\|desfecho\|meta\|tudo` (os dois últimos exigem a fonte externa). No app: tela **Validação da recomendação** (itens 1–2); desfecho/meta só via CLI (ADR-023). |
-| Onde está a validação da recomendação? | Tela **Validação da recomendação** (ADR-026): aba 1 eficácia por desfecho; aba 2 imitação só como contraste. CLI `desfecho`/`meta` continua. |
+| Onde está a validação da recomendação? | Tela **Validação da recomendação** (ADR-026): aba 1 eficácia por desfecho; aba 2 explica por que F1 baixo não importa. CLI `desfecho`/`meta` continua. |
+| Onde ver o fluxo completo na demo? | Tela **Fluxo do sistema** (ADR-027) — mapa, etapas, tomada de decisão e “por quês”; texto completo em `FLUXO.md`. |
 | Qual a meta do cluster? | `META_POR_PERFIL` alcançável (ADR-026): `volume_alto` ≈ 45/28/17/10; `volume_moderado` ≈ 42/22/22/14 (% leve/longão/ritmo/intervalado). |
 | Por que a tela de Comparação de Modelos mostra números diferentes da tela de Protocolo? | De propósito (ADR-020). A primeira é porte do notebook e usa o split antigo; a segunda usa o protocolo corrigido de ADR-017. As duas coexistem com a diferença rotulada. |
 | Quantas telas o app tem? | 8 (ADR-023/025): Home, Visualização, Comparação de Modelos, Categorização, Atletas, Recomendação de Treino, Histórico, Validação da recomendação. |
@@ -536,3 +543,6 @@ Novo pacote [dataset/fontes/](dataset/fontes/) com `FonteDados` (schema canônic
 | 2026-10-12 | IA (Composer) | **ADR-025**: tela `8_Protocolo_Experimental` renomeada para `8_Validacao_da_Recomendacao` — título/subtítulo/lead descritivos. |
 | 2026-10-12 | IA (Composer) | ADR-025: glossário visível de **Déficit** e **Baseline** no topo da tela de Validação. |
 | 2026-10-20 | IA (Composer) | **ADR-026**: eficácia por desfecho na Validação; metas de cluster alcançáveis; imitação demovida; distância atleta×cluster + anti-fadiga por carga. |
+| 2026-10-20 | IA (Composer) | ADR-026: aba 2 renomeada para *Por que F1 baixo não importa*; ranking/matriz em expanders. |
+| 2026-10-26 | IA (Composer) | ADR-026: aba 1 com veredito em linguagem simples, gráfico de tercis e 3 atletas exemplo (alta/média/baixa aderência). |
+| 2026-10-26 | IA (Composer) | **ADR-027**: tela `1_Fluxo_do_Sistema` — mapa do pipeline e tomada de decisão (`FLUXO.md` no Streamlit). |

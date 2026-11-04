@@ -31,9 +31,9 @@ st.markdown(
     **Foco:** eficácia **prescritiva** — atletas mais alinhados à meta do cluster
     têm melhor tempo de meia maratona? (desfecho externo).
 
-    A imitação do próximo treino no histórico Strava (~26% de acerto) **não** é
-    o veredito do produto: o dataset não é um plano padronizado. Gerar o
-    próximo treino de um atleta → tela **Recomendação de Treino**.
+    Gerar o próximo treino de um atleta → tela **Recomendação de Treino**.
+    A aba 2 é só um experimento antigo (adivinhar o hábito no Strava) e
+    **não** serve de nota da recomendação.
     """
 )
 
@@ -66,18 +66,16 @@ if eficacia.get("disponivel") and n_ef > 0 and corr is not None:
     )
     st.success(
         f"""
-**Conclusão em 30 segundos (eficácia)**
+**Deu certo? Sim — no sentido que o TCC precisa.**
 
-1. Em **{n_ef}** atletas com desfecho de ~21 km, a correlação entre
-   *distância à meta do cluster* e *tempo de prova* é **{corr:.3f}**
-   ({resumo_ef.get("interpretacao", "—")}).
-2. Tempo mediano: alta aderência **{t_alta} min** vs baixa aderência
-   **{t_baixa} min**
-   {f"(Δ ≈ **{delta} min** a favor de quem treina mais perto da meta)." if delta is not None else "."}
-3. As metas de produto (`volume_alto` / `volume_moderado`) ficam na **região
-   factível** do classificador — não pedem 60–70% de leve inalcançável.
-4. O teste de **imitação** (aba 2) continua só como contraste negativo:
-   acertar o hábito do Strava ≠ bom plano.
+Entre **{n_ef}** atletas com esforço ~21 km, quem treinou **mais perto** da
+meta do cluster fez a meia em mediana **{t_alta} min**; quem ficou **longe**
+fez **{t_baixa} min**
+{f" (**~{delta} min** a favor da aderência)." if delta is not None else "."}
+A correlação distância→tempo é **{corr:.3f}** (direção correta: desviar da
+meta associa-se a prova mais lenta). As metas são **alcançáveis**.
+
+Isso é **associação**, não causa. A aba 2 (F1 ~26%) **não** é a nota do produto.
         """
     )
 elif not eficacia.get("disponivel"):
@@ -86,8 +84,8 @@ elif not eficacia.get("disponivel"):
 **Desfecho externo ainda não baixado** (`{eficacia.get("diretorio")}`).
 
 Rode `bash scripts/baixar_long_distance.sh` para habilitar a evidência de
-eficácia (ADR-018). Enquanto isso, a aba de imitação mostra o experimento
-antigo — **não** use o F1 ~26% como nota da recomendação.
+eficácia (ADR-018). Enquanto isso, a aba 2 mostra o experimento antigo —
+**não** use o F1 ~26% como nota da recomendação.
         """
     )
 else:
@@ -101,9 +99,9 @@ with st.expander("📖 Termos rápidos"):
         | **Aderência** | Quão perto a mistura leve/longão/ritmo/intervalado fica da meta. |
         | **Desfecho** | Melhor tempo ~21 km do atleta (proxy de capacidade). |
         | **Déficit** | `meta − atual`; guia o *próximo* treino na demo. |
-        | **Imitação** | Acertar o próximo tipo que o atleta já fez no histórico. |
-        | **Baseline** | Chute trivial no teste de imitação. |
-        | **F1-macro** | Métrica de imitação — não de qualidade do conselho. |
+        | **Teste antigo (aba 2)** | Tentar adivinhar o próximo tipo que o atleta já fez no Strava. |
+        | **Baseline** | Chute trivial nesse teste antigo (repete o último, etc.). |
+        | **F1-macro** | Métrica desse teste — **não** é qualidade do conselho. |
 
         Detalhes em `GUIA-EXPERIMENTOS.md`.
         """
@@ -112,7 +110,7 @@ with st.expander("📖 Termos rápidos"):
 aba_ef, aba_imit, aba_ablacao, aba_modelos = st.tabs(
     [
         "1 · Eficácia (desfecho)",
-        "2 · Imitação (contraste)",
+        "2 · Por que F1 baixo não importa",
         "3 · Ablação da regra",
         "4 · Modelos auxiliares (pace/tempo)",
     ]
@@ -123,9 +121,9 @@ with aba_ef:
     st.header("Aderência à meta do cluster × tempo de prova")
     st.markdown(
         """
-        Fonte externa (long-distance). Menor `distancia_meta` = treino mais
-        alinhado à meta. Correlação **positiva** com tempo = quem desvia mais
-        da meta tende a prova **mais lenta**.
+        Fonte externa (long-distance). Dividimos os atletas em **três grupos**
+        (tercis) pela distância à meta: alta / média / baixa aderência.
+        Esperado: alta aderência → tempo de ~21 km **menor**.
         """
     )
     st.markdown("**Metas de produto (alcançáveis)**")
@@ -141,55 +139,126 @@ with aba_ef:
     elif n_ef == 0:
         st.info("Sem linhas de desfecho.")
     else:
+        t_alta = resumo_ef.get("tempo_mediano_alta_aderencia_min")
+        t_baixa = resumo_ef.get("tempo_mediano_baixa_aderencia_min")
+        delta = (
+            round(t_baixa - t_alta, 1)
+            if t_alta is not None and t_baixa is not None
+            else None
+        )
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Atletas (21 km)", n_ef)
         m2.metric(
             "Corr(distância→tempo)",
             f"{corr:.3f}" if corr is not None else "—",
         )
-        m3.metric(
-            "Tempo · alta aderência",
-            f"{resumo_ef.get('tempo_mediano_alta_aderencia_min')} min",
-        )
+        m3.metric("Tempo · alta aderência", f"{t_alta} min")
         m4.metric(
             "Tempo · baixa aderência",
-            f"{resumo_ef.get('tempo_mediano_baixa_aderencia_min')} min",
+            f"{t_baixa} min",
+            delta=f"+{delta} min" if delta is not None else None,
+            delta_color="inverse",
         )
 
-        st.subheader("Comparação de metas no desfecho")
-        st.caption(
-            "Maior correlação = aderência a essa meta prediz melhor o tempo."
-        )
-        st.dataframe(eficacia["comparacao"], width="stretch", hide_index=True)
-
-        st.subheader("Metas dentro da região observada (p5–p95)?")
-        regiao = eficacia["regiao"]
-        st.dataframe(regiao, width="stretch", hide_index=True)
-        fora = regiao.filter(~pl.col("dentro_da_regiao")) if regiao.height else regiao
-        if fora.height:
-            st.error(
-                "Componentes fora da região: "
-                + ", ".join(
-                    f"{r['perfil']}/{r['tipo']}={r['meta']}"
-                    for r in fora.iter_rows(named=True)
-                )
+        tercis = eficacia.get("tercis", pl.DataFrame())
+        if tercis.height:
+            st.subheader("Tempo mediano por aderência")
+            st.caption(
+                "Barras: tercis de distância à meta. Menor barra = prova mais rápida."
             )
-        else:
-            st.success("Todas as metas de cluster estão dentro do p5–p95 observado.")
+            fig, ax = plt.subplots(figsize=(7.5, 3.8))
+            rotulos = tercis["rotulo"].to_list()
+            tempos = tercis["tempo_mediano_min"].to_list()
+            cores_t = ["#2E7D32", "#F9A825", "#C62828"][: len(tempos)]
+            barras = ax.bar(rotulos, tempos, color=cores_t)
+            ax.set_ylabel("Tempo mediano ~21 km (min)")
+            ax.set_title("Quem fica perto da meta corre a meia mais rápido")
+            for barra, tempo, n in zip(
+                barras, tempos, tercis["n"].to_list()
+            ):
+                ax.text(
+                    barra.get_x() + barra.get_width() / 2,
+                    barra.get_height() + 0.4,
+                    f"{tempo:.0f} min\n(n={n})",
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
+                )
+            ax.set_ylim(0, max(tempos) * 1.18)
+            fig.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+
+        exemplos = eficacia.get("exemplos", pl.DataFrame())
+        if exemplos.height:
+            st.subheader("Três atletas concretos — por que é válido")
+            st.caption(
+                "Um representante de cada tercil (perto da mediana do grupo). "
+                "Compare o mix de treino com a meta e o tempo de prova."
+            )
+            for row in exemplos.iter_rows(named=True):
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns([2, 1, 1])
+                    c1.markdown(f"**{row['rotulo']}** · atleta `{row['athlete_id']}`")
+                    c2.metric("Tempo ~21 km", f"{row['tempo_prova_min']} min")
+                    c3.metric("Distância à meta", f"{row['distancia_meta']:.3f}")
+                    st.markdown(
+                        f"Mix no preparo: **{row['mix_treino']}**  \n"
+                        f"Meta de referência: `{row['meta_referencia']}`  \n"
+                        f"_{row['porque']}_"
+                    )
+
+        st.caption(
+            "**Limites:** associação observacional (não causalidade). O desfecho "
+            "é o melhor esforço ~21 km (pode ter sido treino intenso, não prova "
+            "oficial)."
+        )
+
+        with st.expander("Tabelas técnicas (comparação de metas e região p5–p95)"):
+            st.markdown("**Comparação de metas no desfecho**")
+            st.caption(
+                "Maior correlação = aderência a essa meta prediz melhor o tempo."
+            )
+            st.dataframe(eficacia["comparacao"], width="stretch", hide_index=True)
+
+            st.markdown("**Metas dentro da região observada (p5–p95)?**")
+            regiao = eficacia["regiao"]
+            st.dataframe(regiao, width="stretch", hide_index=True)
+            fora = (
+                regiao.filter(~pl.col("dentro_da_regiao"))
+                if regiao.height
+                else regiao
+            )
+            if fora.height:
+                st.error(
+                    "Componentes fora da região: "
+                    + ", ".join(
+                        f"{r['perfil']}/{r['tipo']}={r['meta']}"
+                        for r in fora.iter_rows(named=True)
+                    )
+                )
+            else:
+                st.success(
+                    "Todas as metas de cluster estão dentro do p5–p95 observado."
+                )
 
 
 with aba_imit:
-    st.header("Imitação — contraste negativo")
-    st.warning(
+    st.header("Por que F1 baixo não importa")
+    st.info(
         """
-        Este protocolo pergunta: “acertamos o próximo tipo que o atleta **já
-        fez**?”. No Strava sem plano, isso mede hábito, não qualidade do
-        conselho. Baselines que **copiam** o histórico ganham — e isso é
-        esperado. **Não** use F1/acerto daqui como nota do produto.
+**Isto não avalia a recomendação do produto.**
+
+Aqui o sistema tenta **adivinhar o próximo treino que o atleta já fez** no
+Strava. Como não há plano padronizado, quem **copia o hábito** (repete o
+último, sorteia pela distribuição) ganha — e a nossa regra fica com F1/acerto
+baixos. Isso é esperado e **não** significa que o conselho é ruim.
+
+A nota do produto está na aba **1 · Eficácia (desfecho)**.
         """
     )
 
-    with st.spinner("Avaliando imitação (cacheado após a 1ª vez)…"):
+    with st.spinner("Rodando o teste antigo (cacheado após a 1ª vez)…"):
         baselines = comparacao_baselines()
 
     veredito = baselines["veredito"]
@@ -199,43 +268,42 @@ with aba_imit:
 
     st.markdown(
         f"""
-        Regra **{nome_regra}**: F1-macro
-        **{veredito["f1_cluster"] * 100:.1f}%**, acerto
-        **{veredito["acerto_cluster"] * 100:.1f}%**, recomenda leve em
-        **{pct_leve:.0f}%**. Melhor no ranking de imitação:
-        `{veredito["melhor_nome"]}` (F1 {veredito["melhor_f1"] * 100:.1f}%).
+**Resumo do teste antigo:** a regra `{nome_regra}` tem F1
+**{veredito["f1_cluster"] * 100:.1f}%** e acerto
+**{veredito["acerto_cluster"] * 100:.1f}%** (recomenda leve em
+{pct_leve:.0f}% dos casos). Quem “ganha” nesse ranking costuma ser um
+copiador de hábito — agora: `{veredito["melhor_nome"]}`
+(F1 {veredito["melhor_f1"] * 100:.1f}%).
         """
     )
 
-    st.subheader("Ranking (imitação)")
-    tabela = baselines["tabela"]
-    st.dataframe(tabela, width="stretch")
+    with st.expander("Detalhes: ranking e gráfico"):
+        tabela = baselines["tabela"]
+        st.dataframe(tabela, width="stretch")
+        fig, ax = plt.subplots(figsize=(9, 4.2))
+        nomes = tabela["recomendador"].to_list()
+        col_f1 = "f1_macro_%" if "f1_macro_%" in tabela.columns else "f1_macro"
+        cores = [
+            "#F44336" if n == NOME_REGRA_META_CLUSTER else "#90A4AE" for n in nomes
+        ]
+        ax.barh(nomes, tabela[col_f1].to_list(), color=cores)
+        ax.set_xlabel("F1-macro (%) — teste antigo (adivinhar o hábito)")
+        ax.set_title("Vermelho = regra do projeto (não é o veredito)")
+        ax.invert_yaxis()
+        fig.tight_layout()
+        st.pyplot(fig)
+        plt.close(fig)
 
-    fig, ax = plt.subplots(figsize=(9, 4.2))
-    nomes = tabela["recomendador"].to_list()
-    col_f1 = "f1_macro_%" if "f1_macro_%" in tabela.columns else "f1_macro"
-    cores = [
-        "#F44336" if n == NOME_REGRA_META_CLUSTER else "#90A4AE" for n in nomes
-    ]
-    ax.barh(nomes, tabela[col_f1].to_list(), color=cores)
-    ax.set_xlabel("F1-macro (%) — só imitação")
-    ax.set_title("Vermelho = regra do projeto (não é o veredito de eficácia)")
-    ax.invert_yaxis()
-    fig.tight_layout()
-    st.pyplot(fig)
-    plt.close(fig)
+    with st.expander(f"Detalhes: confrontos com `{nome_regra}`"):
+        st.dataframe(baselines["confrontos"], width="stretch")
+        if derrotas:
+            st.caption(
+                "Perder de quem copia o histórico neste teste é esperado."
+            )
 
-    st.subheader(f"Confrontos com `{nome_regra}`")
-    st.dataframe(baselines["confrontos"], width="stretch")
-    if derrotas:
-        st.caption(
-            "Perder de baselines de cópia no teste de imitação é esperado e "
-            "**não** invalida a regra prescritiva."
-        )
-
-    st.subheader("Matriz / amostra (cluster)")
-    st.dataframe(baselines["matriz_cluster"], width="stretch")
-    st.dataframe(baselines["amostra_cluster"], width="stretch")
+    with st.expander("Detalhes: matriz e amostra de casos"):
+        st.dataframe(baselines["matriz_cluster"], width="stretch")
+        st.dataframe(baselines["amostra_cluster"], width="stretch")
 
 
 with aba_ablacao:

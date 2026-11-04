@@ -11,6 +11,7 @@ st.markdown(
 
     Use o menu lateral para navegar. Disponível agora:
 
+    - **Fluxo do sistema** — mapa do pipeline e da tomada de decisão (`FLUXO.md`).
     - **Visualização do Dataset** — resumo, normalização e gráficos exploratórios.
     - **Comparação de Modelos** — métricas e gráficos de todos os modelos.
     - **Categorização de Corredores — KMeans** — clusters por gênero e fichas.
@@ -19,8 +20,8 @@ st.markdown(
       cluster, distribuição vs meta do cluster, próximo treino e Gemini.
     - **Histórico de Recomendações** — recomendações da IA persistidas.
     - **Validação da recomendação** — *a regra funciona?* Eficácia por
-      desfecho (aderência × tempo de 21 km); imitação só como contraste;
-      ablação e modelos auxiliares.
+      desfecho (aderência × tempo de 21 km); aba sobre por que F1 baixo
+      não importa; ablação e modelos auxiliares.
 
     > As telas de Visualização, Comparação e Categorização são portes dos
     > notebooks de `notebooks/`.

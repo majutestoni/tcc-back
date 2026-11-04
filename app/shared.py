@@ -703,32 +703,31 @@ def eficacia_por_desfecho(max_atletas: int = 12000) -> dict:
     """
     from dataset.experimentos.eficacia_desfecho import (
         comparar_metas_no_desfecho,
+        exemplos_atletas_aderencia,
         resumo_aderencia_desfecho,
         tabela_metas_vs_regiao,
+        tempos_por_tercil,
     )
     from dataset.models.previsao_treino.recomendacao_cluster import META_CLUSTER_PADRAO
 
     disponivel, diretorio = fonte_externa_disponivel()
+    vazio = {
+        "disponivel": disponivel,
+        "diretorio": diretorio,
+        "resumo_padrao": {},
+        "comparacao": pl.DataFrame(),
+        "regiao": pl.DataFrame(),
+        "tercis": pl.DataFrame(),
+        "exemplos": pl.DataFrame(),
+        "n": 0,
+    }
     if not disponivel:
-        return {
-            "disponivel": False,
-            "diretorio": diretorio,
-            "resumo_padrao": {},
-            "comparacao": pl.DataFrame(),
-            "regiao": pl.DataFrame(),
-            "n": 0,
-        }
+        vazio["disponivel"] = False
+        return vazio
 
     tabela = desfecho_meia(max_atletas)["tabela"]
     if tabela.height == 0:
-        return {
-            "disponivel": True,
-            "diretorio": diretorio,
-            "resumo_padrao": {},
-            "comparacao": pl.DataFrame(),
-            "regiao": pl.DataFrame(),
-            "n": 0,
-        }
+        return vazio
 
     resumo = resumo_aderencia_desfecho(
         tabela, meta=META_CLUSTER_PADRAO, nome_meta="cluster · volume_moderado"
@@ -739,6 +738,8 @@ def eficacia_por_desfecho(max_atletas: int = 12000) -> dict:
         "resumo_padrao": resumo,
         "comparacao": comparar_metas_no_desfecho(tabela),
         "regiao": tabela_metas_vs_regiao(tabela),
+        "tercis": tempos_por_tercil(tabela, meta=META_CLUSTER_PADRAO),
+        "exemplos": exemplos_atletas_aderencia(tabela, meta=META_CLUSTER_PADRAO),
         "n": tabela.height,
         "fonte": desfecho_meia(max_atletas).get("fonte", {}),
     }

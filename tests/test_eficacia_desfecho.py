@@ -7,8 +7,10 @@ from dataset.constants import COL_ATHLETE, COL_TEMPO_PROVA
 from dataset.experimentos.desfecho import TIPOS
 from dataset.experimentos.eficacia_desfecho import (
     comparar_metas_no_desfecho,
+    exemplos_atletas_aderencia,
     resumo_aderencia_desfecho,
     tabela_metas_vs_regiao,
+    tempos_por_tercil,
 )
 from dataset.models.previsao_treino.recomendacao_cluster import META_POR_PERFIL
 
@@ -71,6 +73,23 @@ def test_comparar_metas_e_regiao():
     assert set(regiao["tipo"].unique().to_list()) == set(TIPOS)
     assert regiao.height == len(META_POR_PERFIL) * len(TIPOS)
     assert "dentro_da_regiao" in regiao.columns
+
+
+def test_tercis_e_exemplos_atletas():
+    tabela = _tabela_sintetica()
+    tercis = tempos_por_tercil(tabela)
+    assert tercis.height == 3
+    assert set(tercis["tercil"].to_list()) == {"alta", "media", "baixa"}
+    # Alta aderência deve ter tempo mediano <= baixa
+    t_alta = tercis.filter(pl.col("tercil") == "alta")["tempo_mediano_min"][0]
+    t_baixa = tercis.filter(pl.col("tercil") == "baixa")["tempo_mediano_min"][0]
+    assert t_alta <= t_baixa
+
+    exemplos = exemplos_atletas_aderencia(tabela)
+    assert exemplos.height == 3
+    assert "porque" in exemplos.columns
+    assert "mix_treino" in exemplos.columns
+    assert exemplos["athlete_id"].n_unique() == 3
 
 
 def test_recomendacao_mistura_distancia_atleta():
