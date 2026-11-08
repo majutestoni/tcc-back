@@ -14,3 +14,6 @@ __pycache__/
 
 # Streamlit — cache persistido em disco (@st.cache_data persist="disk")
 .streamlit/cache/
+
+# Material de terceiros (TCCs de referência da FURB) — não versionar
+referencias/

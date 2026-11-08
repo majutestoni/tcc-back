@@ -18,7 +18,11 @@ CORES_TIPO = {
     "intervalado": "#F44336",
 }
 ORDEM_TIPO = ["leve", "longao", "ritmo", "intervalado"]
+CORES_GENERO = {"M": "#2E86AB", "F": "#E84855"}
+ORDEM_GENERO = ["M", "F"]
+ROTULO_GENERO = {"M": "Masculino", "F": "Feminino"}
 XLIM_DISTANCIA_KM = (0, 50)
+FORMATO_TIMESTAMP = "%d/%m/%Y %H:%M"
 
 FEATURES_MULTIDIM = [
     {"col": COL_DISTANCE, "label": "Distância mediana", "invert": False},
@@ -184,9 +188,8 @@ def plotar_pace_por_genero(df: pl.DataFrame, ax: Axes | None = None) -> Axes:
         patch_artist=True,
         showfliers=False,
     )
-    cores_genero = {"M": "#2E86AB", "F": "#E84855"}
     for patch, genero in zip(bp["boxes"], generos):
-        patch.set_facecolor(cores_genero.get(genero, "gray"))
+        patch.set_facecolor(CORES_GENERO.get(genero, "gray"))
         patch.set_alpha(0.75)
 
     ax.set_xlabel("Gênero")
@@ -195,6 +198,104 @@ def plotar_pace_por_genero(df: pl.DataFrame, ax: Axes | None = None) -> Axes:
     ax.grid(axis="y", alpha=0.1)
 
     return ax
+
+
+def distribuicao_por_genero(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Quantidade de corridas e de atletas distintos por gênero, com a média de
+    corridas por atleta e a participação percentual de cada um nos dois totais.
+
+    Registros com gênero ausente são descartados.
+    """
+    por_genero = (
+        df.select(COL_GENDER, COL_ATHLETE)
+        .drop_nulls(COL_GENDER)
+        .with_columns(
+            pl.col(COL_GENDER).cast(pl.Utf8).str.strip_chars().str.to_uppercase()
+        )
+        .group_by(COL_GENDER)
+        .agg(
+            pl.len().alias("corridas"),
+            pl.col(COL_ATHLETE).n_unique().alias("atletas"),
+        )
+        .sort("corridas", descending=True)
+    )
+
+    total_corridas = por_genero["corridas"].sum()
+    total_atletas = por_genero["atletas"].sum()
+    return por_genero.with_columns(
+        pl.col(COL_GENDER).replace(ROTULO_GENERO).alias("genero_rotulo"),
+        (pl.col("corridas") / total_corridas * 100).round(1).alias("pct_corridas"),
+        (pl.col("atletas") / total_atletas * 100).round(1).alias("pct_atletas"),
+        (pl.col("corridas") / pl.col("atletas")).round(1).alias("corridas_por_atleta"),
+    )
+
+
+def _barras_por_genero(
+    por_genero: pl.DataFrame, coluna: str, coluna_pct: str, ylabel: str, titulo: str, ax: Axes
+) -> Axes:
+    ordenado = por_genero.sort(
+        pl.col(COL_GENDER).replace_strict(
+            {g: i for i, g in enumerate(ORDEM_GENERO)}, default=len(ORDEM_GENERO)
+        )
+    )
+    generos = ordenado[COL_GENDER].to_list()
+    valores = ordenado[coluna].to_list()
+
+    barras = ax.bar(
+        [ROTULO_GENERO.get(g, g) for g in generos],
+        valores,
+        color=[CORES_GENERO.get(g, "gray") for g in generos],
+        edgecolor="white",
+        alpha=0.85,
+    )
+    for barra, valor, pct in zip(barras, valores, ordenado[coluna_pct].to_list()):
+        ax.annotate(
+            f"{valor} ({pct}%)",
+            (barra.get_x() + barra.get_width() / 2, barra.get_height()),
+            textcoords="offset points",
+            xytext=(0, 3),
+            ha="center",
+            fontsize=9,
+        )
+
+    ax.set_xlabel("Gênero")
+    ax.set_ylabel(ylabel)
+    ax.set_title(titulo)
+    ax.margins(y=0.12)
+    ax.grid(axis="y", alpha=0.1)
+
+    return ax
+
+
+def plotar_corridas_por_genero(df: pl.DataFrame, ax: Axes | None = None) -> Axes:
+    """Barras com a quantidade de corridas por gênero (rótulo = total e % do dataset)."""
+    if ax is None:
+        _, ax = plt.subplots(figsize=(8, 5))
+
+    return _barras_por_genero(
+        distribuicao_por_genero(df),
+        coluna="corridas",
+        coluna_pct="pct_corridas",
+        ylabel="Quantidade de corridas",
+        titulo="Corridas por gênero",
+        ax=ax,
+    )
+
+
+def plotar_atletas_por_genero(df: pl.DataFrame, ax: Axes | None = None) -> Axes:
+    """Barras com a quantidade de atletas distintos por gênero (rótulo = total e %)."""
+    if ax is None:
+        _, ax = plt.subplots(figsize=(8, 5))
+
+    return _barras_por_genero(
+        distribuicao_por_genero(df),
+        coluna="atletas",
+        coluna_pct="pct_atletas",
+        ylabel="Quantidade de atletas",
+        titulo="Atletas por gênero",
+        ax=ax,
+    )
 
 
 def plotar_corridas_por_atleta(df: pl.DataFrame, ax: Axes | None = None) -> Axes:
@@ -212,6 +313,73 @@ def plotar_corridas_por_atleta(df: pl.DataFrame, ax: Axes | None = None) -> Axes
     ax.set_xlabel("Corridas por atleta")
     ax.set_ylabel("Quantidade de atletas")
     ax.set_title("Volume de treinos por atleta")
+    ax.grid(axis="y", alpha=0.1)
+
+    return ax
+
+
+def distribuicao_anual(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Quantidade de corridas por ano, com atletas distintos, distância total (km),
+    distância mediana (km), pace mediano e participação percentual no dataset.
+
+    Registros com `timestamp` inválido ou ausente são descartados.
+    """
+    por_ano = (
+        df.with_columns(
+            pl.col(COL_TIMESTAMP)
+            .str.strptime(pl.Datetime, format=FORMATO_TIMESTAMP, strict=False)
+            .dt.year()
+            .alias("ano")
+        )
+        .drop_nulls("ano")
+        .group_by("ano")
+        .agg(
+            pl.len().alias("corridas"),
+            pl.col(COL_ATHLETE).n_unique().alias("atletas"),
+            (pl.col(COL_DISTANCE).sum() / 1000).round(1).alias("distancia_total_km"),
+            (pl.col(COL_DISTANCE).median() / 1000).round(2).alias("distancia_mediana_km"),
+            pl.col(COL_PACE).median().round(2).alias("pace_mediano"),
+        )
+        .sort("ano")
+    )
+
+    total = por_ano["corridas"].sum()
+    return por_ano.with_columns(
+        (pl.col("corridas") / total * 100).round(1).alias("percentual")
+    )
+
+
+def plotar_distribuicao_anual(df: pl.DataFrame, ax: Axes | None = None) -> Axes:
+    """Barras com a quantidade de corridas por ano (rótulo = % do dataset)."""
+    por_ano = distribuicao_anual(df)
+
+    if ax is None:
+        _, ax = plt.subplots(figsize=(10, 5))
+
+    anos = por_ano["ano"].to_list()
+    corridas = por_ano["corridas"].to_list()
+
+    barras = ax.bar(
+        [str(ano) for ano in anos],
+        corridas,
+        color="#2E86AB",
+        edgecolor="white",
+        alpha=0.85,
+    )
+    for barra, pct in zip(barras, por_ano["percentual"].to_list()):
+        ax.annotate(
+            f"{pct}%",
+            (barra.get_x() + barra.get_width() / 2, barra.get_height()),
+            textcoords="offset points",
+            xytext=(0, 3),
+            ha="center",
+            fontsize=8,
+        )
+
+    ax.set_xlabel("Ano")
+    ax.set_ylabel("Quantidade de corridas")
+    ax.set_title("Distribuição anual das corridas")
     ax.grid(axis="y", alpha=0.1)
 
     return ax

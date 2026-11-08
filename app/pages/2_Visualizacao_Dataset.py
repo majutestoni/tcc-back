@@ -13,7 +13,12 @@ import streamlit as st
 
 from app.shared import CSV_PADRAO, carregar_df, carregar_df_raw, perfil_multidim
 from dataset.analise import (
+    distribuicao_anual,
+    distribuicao_por_genero,
     moda_distancia_km,
+    plotar_atletas_por_genero,
+    plotar_corridas_por_genero,
+    plotar_distribuicao_anual,
     plotar_coordenadas_paralelas,
     plotar_distribuicao_tipo_treino,
     plotar_histograma_distancia,
@@ -56,6 +61,58 @@ st.caption("Quantas corridas foram removidas pelo preprocessamento determinísti
 st.dataframe(
     resumo_preprocessamento(df_raw, df).to_pandas(), width="stretch", hide_index=True
 )
+
+# --- Distribuição anual das corridas ----------------------------------------
+st.header("Distribuição anual das corridas")
+st.caption(
+    "Quantas corridas o dataset tem em cada ano, com atletas distintos, volume "
+    "total e pace mediano. Registros sem `timestamp` válido ficam de fora."
+)
+
+anual = distribuicao_anual(df)
+st.dataframe(
+    anual.rename(
+        {
+            "ano": "Ano",
+            "corridas": "Corridas",
+            "atletas": "Atletas",
+            "distancia_total_km": "Distância total (km)",
+            "distancia_mediana_km": "Distância mediana (km)",
+            "pace_mediano": "Pace mediano (min/km)",
+            "percentual": "% do dataset",
+        }
+    ).to_pandas(),
+    width="stretch",
+    hide_index=True,
+)
+st.pyplot(plotar_distribuicao_anual(df).get_figure())
+
+# --- Distribuição por gênero ------------------------------------------------
+st.header("Distribuição por gênero")
+st.caption(
+    "Dois recortes diferentes: volume de corridas registradas e quantidade de "
+    "atletas distintos. A diferença entre os dois mostra o desbalanceamento da amostra."
+)
+
+por_genero = distribuicao_por_genero(df)
+st.dataframe(
+    por_genero.select(
+        pl.col("genero_rotulo").alias("Gênero"),
+        pl.col("corridas").alias("Corridas"),
+        pl.col("pct_corridas").alias("% das corridas"),
+        pl.col("atletas").alias("Atletas"),
+        pl.col("pct_atletas").alias("% dos atletas"),
+        pl.col("corridas_por_atleta").alias("Corridas por atleta"),
+    ).to_pandas(),
+    width="stretch",
+    hide_index=True,
+)
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+plotar_corridas_por_genero(df, ax=axes[0])
+plotar_atletas_por_genero(df, ax=axes[1])
+fig.tight_layout()
+st.pyplot(fig)
 
 # --- Painel exploratório ----------------------------------------------------
 st.header("Painel exploratório (6 gráficos)")
